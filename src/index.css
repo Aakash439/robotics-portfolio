@@ -1,0 +1,198 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-serif: 'Cormorant Garamond', Georgia, serif;
+  --font-mono: 'JetBrains Mono', 'Geist Mono', ui-monospace, monospace;
+  --bg-canvas: #ECECEB;
+  --bg-plate: #F5F5F3;
+  --border-plate: #D5D5D0;
+  --text-primary: #111111;
+  --text-muted: #666662;
+  --rocker-orange: #FF5500;
+  --led-red: #FF3B30;
+  --led-green: #10B981;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: #ECECEB;
+    color: #111111;
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: #ECECEB;
+    color: #111111;
+    letter-spacing: -0.011em;
+    overflow-x: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Prevent mobile single-tap from triggering Google Touch-to-Search bottom sheet or magnifying callout */
+  h1, h2, h3, h4, h5, h6, button, a, nav, label, [role="button"], .select-none {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-sans);
+    letter-spacing: -0.025em;
+    font-weight: 700;
+    color: #111111;
+  }
+}
+
+@layer utilities {
+  .text-metallic {
+    color: #111111;
+  }
+
+  /* Tactile Stamped Anodized Aluminum Plate */
+  .panel-hardware {
+    background-color: #F5F5F3;
+    border: 1px solid #D5D5D0;
+    border-radius: 0.75rem;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 1px 3px rgba(0, 0, 0, 0.05), 0 8px 24px -8px rgba(0, 0, 0, 0.08);
+  }
+
+  /* Tactile Recessed Stamped Plate */
+  .panel-recessed {
+    background-color: #E6E6E3;
+    border: 1px solid #D0D0CA;
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06), 0 1px 0 rgba(255, 255, 255, 0.8);
+  }
+
+  /* Physical OP-1 Tactile Plastic Push Button (Orange) */
+  .btn-rocker-orange {
+    background-color: #FF5500;
+    color: #FFFFFF;
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    box-shadow: 0 2px 0 #CC4400, 0 3px 6px rgba(255, 85, 0, 0.25);
+    transition: all 0.1s ease;
+    white-space: nowrap;
+  }
+  .btn-rocker-orange:hover {
+    background-color: #FF6611;
+  }
+  .btn-rocker-orange:active {
+    transform: translateY(2px);
+    box-shadow: 0 0 0 #CC4400;
+  }
+
+  /* Physical OP-1 Tactile Plastic Push Button (Bone/White) */
+  .btn-rocker-white {
+    background-color: #F0F0ED;
+    color: #1A1A18;
+    border: 1px solid #D0D0CA;
+    font-family: 'Geist Mono', monospace;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    box-shadow: 0 2px 0 #C4C4BD, 0 2px 4px rgba(0, 0, 0, 0.04);
+    transition: all 0.1s ease;
+  }
+  .btn-rocker-white:hover {
+    background-color: #F8F8F6;
+  }
+  .btn-rocker-white:active {
+    transform: translateY(2px);
+    box-shadow: 0 0 0 #C4C4BD;
+  }
+
+  /* Recessed 7-Segment / Multimeter LED Window */
+  .display-led-window {
+    background-color: #121315;
+    color: #FF453A;
+    font-family: 'Geist Mono', monospace;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    border: 1px solid rgba(0, 0, 0, 0.6);
+    border-radius: 0.25rem;
+    box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.9), 0 1px 0 rgba(255, 255, 255, 0.7);
+    text-shadow: 0 0 8px rgba(255, 69, 58, 0.5);
+  }
+
+  /* Workbench Cutting Mat / Precision Drafting Grid */
+  .bg-workbench-grid {
+    background-color: #ECECEB;
+    background-size: 20px 20px;
+    background-image:
+      linear-gradient(to right, rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+  }
+
+  /* Drafting plate grid */
+  .bg-drafting-plate {
+    background-color: #E8E8E5;
+    background-size: 16px 16px;
+    background-image:
+      linear-gradient(to right, rgba(0, 0, 0, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+  }
+}
+
+/* Precision Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #E5E5E3;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #C4C4C0;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #FF5500;
+}
+
+/* CAD Schematic X-Ray Overlay Mode */
+html.schematic-xray-active body {
+  background-color: #0B121A !important;
+  color: #E2F1FF !important;
+  background-image: 
+    linear-gradient(to right, rgba(56, 189, 248, 0.1) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(56, 189, 248, 0.1) 1px, transparent 1px) !important;
+  background-size: 24px 24px !important;
+  transition: background-color 0.4s ease;
+}
+
+html.schematic-xray-active .panel-hardware,
+html.schematic-xray-active .panel-recessed {
+  background-color: #111A24 !important;
+  border-color: #1E3A5F !important;
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.1), inset 0 1px 0 rgba(56, 189, 248, 0.25) !important;
+  transition: all 0.4s ease;
+}
+
+html.schematic-xray-active h1, 
+html.schematic-xray-active h2, 
+html.schematic-xray-active h3,
+html.schematic-xray-active p {
+  color: #E2F1FF !important;
+}
+
+html.schematic-xray-active img {
+  filter: contrast(1.15) brightness(0.9) hue-rotate(180deg) invert(0.08);
+  transition: filter 0.4s ease;
+}

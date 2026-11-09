@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Rounded Dark Titanium Tile -->
+  <rect width="32" height="32" rx="7" fill="#0C0D10" />
+  <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="6.25" stroke="#2D3039" stroke-width="1.2" />
+
+  <!-- Base Pedestal Platform -->
+  <rect x="4" y="25.5" width="11" height="3" rx="1.2" fill="#272930" stroke="#A1A1AA" stroke-width="1" />
+
+  <!-- Lower Link (Base to Elbow) -->
+  <line x1="9.5" y1="25" x2="14.5" y2="12.5" stroke="#F4F4F6" stroke-width="3.2" stroke-linecap="round" />
+
+  <!-- Upper Forearm Link (Elbow to Wrist) -->
+  <line x1="14.5" y1="12.5" x2="23" y2="10.5" stroke="#D4D4D8" stroke-width="2.6" stroke-linecap="round" />
+
+  <!-- Articulated Two-Finger Gripper Claw -->
+  <path d="M 23 10.5 L 26.8 7.5 L 29.2 9.2" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+  <path d="M 23 10.5 L 26.8 13.5 L 29.2 11.8" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- Base Joint Pivot (Safety Orange LED) -->
+  <circle cx="9.5" cy="25" r="2.6" fill="#181A20" stroke="#F4F4F6" stroke-width="1.1" />
+  <circle cx="9.5" cy="25" r="1.2" fill="#FF5C00" />
+
+  <!-- Shoulder/Elbow Joint Pivot (Telemetry Emerald LED) -->
+  <circle cx="14.5" cy="12.5" r="2.5" fill="#181A20" stroke="#F4F4F6" stroke-width="1.1" />
+  <circle cx="14.5" cy="12.5" r="1.15" fill="#10B981" />
+
+  <!-- Wrist Joint Pivot (Safety Orange LED) -->
+  <circle cx="23" cy="10.5" r="2" fill="#181A20" stroke="#F4F4F6" stroke-width="1" />
+  <circle cx="23" cy="10.5" r="0.95" fill="#FF5C00" />
+</svg>
