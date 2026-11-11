@@ -837,8 +837,9 @@ export const HeroSection: React.FC = () => {
                   className="bg-[#FF5500] text-black px-2 py-0.5 rounded-sm inline-block select-none cursor-pointer transform-gpu shadow-sm hover:shadow-md transition-shadow"
                   title="Aakash Sharma · Click for tactile pulse"
                 >
-                  aakash sharma.
+                  aakash.
                 </span>
+                <span className="sr-only"> Sharma - Robotics Engineer</span>
               </h1>
 
               {/* Line 2: Flowing Editorial Italic Serif */}
