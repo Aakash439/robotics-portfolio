@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Navbar } from './components/Navbar';
 import { Footer } from './components/Footer';
@@ -8,8 +8,16 @@ import { BenchtopTestSuite } from './components/BenchtopTestSuite';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { HomePage } from './pages/HomePage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
+import { trackInstagramVisitor } from './utils/visitorTracker';
 
 export const App: React.FC = () => {
+  useEffect(() => {
+    // Run in background after initial page load so performance is never impacted
+    const timer = window.setTimeout(() => {
+      trackInstagramVisitor();
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);
   return (
     <Router>
       <div className="min-h-screen flex flex-col bg-[#ECECEB] text-[#111111] selection:bg-[#FF5500]/20 selection:text-[#111111] relative">
