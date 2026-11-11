@@ -113,7 +113,7 @@ export const PERSONAL_PROFILE = {
    * Your live website address (no trailing slash). Used for the sitemap, robots.txt
    * and social-share previews. Update this once you know your domain.
    */
-  siteUrl: 'https://aakashsharma.dev',
+  siteUrl: 'https://aakashrobotics.tech',
   eyebrowLocation: 'Pune | Kalyan, India',
   heroHeadlineLine1: 'Building autonomous machines',
   heroHeadlineLine2: 'and real-time embedded control.',
@@ -122,7 +122,7 @@ export const PERSONAL_PROFILE = {
   stageTelemetryTag: '6-DoF Kinematics · Real-Time IK · Interactive Canvas',
   aboutEditorialImage: '/images/workshop-bench.jpg',
   contact: {
-    email: 'aakashsharma0439@gmail.com',
+    email: 'contact@aakashrobotics.tech',
     links: [
       {
         label: 'GitHub',

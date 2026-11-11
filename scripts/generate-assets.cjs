@@ -47,7 +47,7 @@ function generatePdf() {
   add('BT');
   add('/F1 8.5 Tf');
   add(`${marginX} ${y} Td`);
-  add('(aakashsharma0439@gmail.com   |   Pune, India   |   github.com/Aakash439   |   linkedin.com/in/aakash-sharma   |   aakashsharma.dev) Tj');
+  add('(contact@aakashrobotics.tech   |   Pune, India   |   github.com/Aakash439   |   linkedin.com/in/aakash-sharma   |   aakashrobotics.tech) Tj');
   add('ET');
   y -= 10;
 
@@ -605,6 +605,10 @@ function generateOgImage() {
   const outPath = path.join(outDir, 'og-preview.png');
   fs.writeFileSync(outPath, pngFile);
   console.log(`[OK] Generated og-preview.png at: ${outPath} (${pngFile.length} bytes)`);
+
+  const rootOgPath = path.resolve(__dirname, '../public/og-image.png');
+  fs.writeFileSync(rootOgPath, pngFile);
+  console.log(`[OK] Generated root og-image.png at: ${rootOgPath} (${pngFile.length} bytes)`);
 }
 
 generatePdf();

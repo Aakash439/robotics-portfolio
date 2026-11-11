@@ -1,32 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://aakashsharma.dev/</loc>
-    <changefreq>weekly</changefreq>
+    <loc>https://aakashrobotics.tech/</loc>
+    <changefreq>monthly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://aakashsharma.dev/projects/motorguard-industrial-motor-protection-cbm</loc>
+    <loc>https://aakashrobotics.tech/projects/motorguard-industrial-motor-protection-cbm</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://aakashsharma.dev/projects/6wd-all-terrain-autonomous-rover</loc>
+    <loc>https://aakashrobotics.tech/projects/6wd-all-terrain-autonomous-rover</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://aakashsharma.dev/projects/high-speed-autonomous-line-following-agv</loc>
+    <loc>https://aakashrobotics.tech/projects/high-speed-autonomous-line-following-agv</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://aakashsharma.dev/projects/smart-vehicular-alcohol-detection-engine-braking</loc>
+    <loc>https://aakashrobotics.tech/projects/smart-vehicular-alcohol-detection-engine-braking</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://aakashsharma.dev/projects/contactless-automated-door-access-motion-system</loc>
+    <loc>https://aakashrobotics.tech/projects/contactless-automated-door-access-motion-system</loc>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>

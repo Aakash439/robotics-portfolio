@@ -61,58 +61,77 @@ export const HeroSection: React.FC = () => {
     if (!heroContainerRef.current) return;
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 
-    const ctx = gsap.context(() => {
-      const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
+    let ctx: gsap.Context | null = null;
 
-      tl.from(eyebrowRef.current, {
-        y: -18,
-        opacity: 0,
-        duration: 0.5,
-        ease: 'back.out(1.5)',
-      })
-      .from(line1Ref.current, {
-        y: 28,
-        opacity: 0,
-        duration: 0.55,
-      }, '-=0.25')
-      .from(badgeRef.current, {
-        scale: 0.5,
-        rotation: -6,
-        opacity: 0,
-        duration: 0.55,
-        ease: 'back.out(2.2)',
-      }, '-=0.35')
-      .from(line2Ref.current, {
-        y: 24,
-        opacity: 0,
-        duration: 0.55,
-      }, '-=0.35')
-      .from(line3Ref.current, {
-        y: 24,
-        opacity: 0,
-        duration: 0.55,
-      }, '-=0.35')
-      .fromTo(
-        underlineRef.current,
-        { scaleX: 0, transformOrigin: 'left center' },
-        { scaleX: 1, duration: 0.6, ease: 'power2.out' },
-        '-=0.2'
-      )
-      .from(bioRef.current, {
-        y: 16,
-        opacity: 0,
-        duration: 0.5,
-      }, '-=0.3')
-      .from(buttonsRef.current ? Array.from(buttonsRef.current.children) : [], {
-        y: 14,
-        opacity: 0,
-        duration: 0.45,
-        stagger: 0.08,
-        ease: 'back.out(1.4)',
-      }, '-=0.25');
-    }, heroContainerRef);
+    const runTimeline = () => {
+      if (ctx) ctx.revert();
+      ctx = gsap.context(() => {
+        const tl = gsap.timeline({ defaults: { ease: 'power3.out' } });
 
-    return () => ctx.revert();
+        tl.from(eyebrowRef.current, {
+          y: -18,
+          opacity: 0,
+          duration: 0.5,
+          ease: 'back.out(1.5)',
+        })
+        .from(line1Ref.current, {
+          y: 28,
+          opacity: 0,
+          duration: 0.55,
+        }, '-=0.25')
+        .from(badgeRef.current, {
+          scale: 0.5,
+          rotation: -6,
+          opacity: 0,
+          duration: 0.55,
+          ease: 'back.out(2.2)',
+        }, '-=0.35')
+        .from(line2Ref.current, {
+          y: 24,
+          opacity: 0,
+          duration: 0.55,
+        }, '-=0.35')
+        .from(line3Ref.current, {
+          y: 24,
+          opacity: 0,
+          duration: 0.55,
+        }, '-=0.35')
+        .fromTo(
+          underlineRef.current,
+          { scaleX: 0, transformOrigin: 'left center' },
+          { scaleX: 1, duration: 0.6, ease: 'power2.out' },
+          '-=0.2'
+        )
+        .from(bioRef.current, {
+          y: 16,
+          opacity: 0,
+          duration: 0.5,
+        }, '-=0.3')
+        .from(buttonsRef.current ? Array.from(buttonsRef.current.children) : [], {
+          y: 14,
+          opacity: 0,
+          duration: 0.45,
+          stagger: 0.08,
+          ease: 'back.out(1.4)',
+        }, '-=0.25');
+      }, heroContainerRef);
+    };
+
+    const hasBooted = typeof window !== 'undefined' && sessionStorage.getItem('boot-sequence-shown');
+    let timer = 0;
+
+    if (hasBooted) {
+      runTimeline();
+    } else {
+      timer = window.setTimeout(runTimeline, 1200);
+      window.addEventListener('portfolio-boot-complete', runTimeline, { once: true });
+    }
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('portfolio-boot-complete', runTimeline);
+      if (ctx) ctx.revert();
+    };
   }, []);
 
   // GSAP Magnetic Physics on 'aakash.' badge
@@ -809,6 +828,7 @@ export const HeroSection: React.FC = () => {
               <h1
                 ref={line1Ref}
                 className="text-4xl md:text-6xl font-extrabold text-[#111111] tracking-tight font-sans select-none"
+                aria-label="Aakash Sharma — Robotics Engineer & Autonomous Systems"
               >
                 hey, i'm{' '}
                 <span
@@ -817,7 +837,7 @@ export const HeroSection: React.FC = () => {
                   className="bg-[#FF5500] text-black px-2 py-0.5 rounded-sm inline-block select-none cursor-pointer transform-gpu shadow-sm hover:shadow-md transition-shadow"
                   title="Aakash Sharma · Click for tactile pulse"
                 >
-                  aakash.
+                  aakash sharma.
                 </span>
               </h1>
 

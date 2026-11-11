@@ -25,7 +25,7 @@ console.log('[2] PASS: public/sitemap.xml covers all active project slugs and ro
 
 // 3. Verify robots.txt
 const robots = fs.readFileSync(path.join(root, 'public/robots.txt'), 'utf8');
-if (!robots.includes('sitemap.xml') || !robots.includes('aakashsharma.dev')) {
+if (!robots.includes('sitemap.xml') || !robots.includes('aakashrobotics.tech')) {
   throw new Error('robots.txt missing valid sitemap reference');
 }
 console.log('[3] PASS: public/robots.txt points to correct domain sitemap.');

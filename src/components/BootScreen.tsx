@@ -27,10 +27,25 @@ export const BootScreen: React.FC = () => {
   const [progress, setProgress] = useState(0);
   const lastStepRef = useRef(-1);
 
+  const dismissBoot = () => {
+    setProgress(100);
+    setIsVisible(false);
+    try {
+      sessionStorage.setItem(SESSION_KEY, '1');
+    } catch {
+      // fallback
+    }
+    window.dispatchEvent(new CustomEvent('portfolio-boot-complete'));
+  };
+
   useEffect(() => {
     if (!isVisible) return;
+
+    // Hard fail-safe: boot screen MUST dismiss within 1.8s regardless of requestAnimationFrame or tab throttling
+    const safetyTimer = window.setTimeout(dismissBoot, 1800);
+
     const start = performance.now();
-    const duration = 1350;
+    const duration = 1250;
     let rafId = 0;
     let hideTimer = 0;
 
@@ -54,7 +69,7 @@ export const BootScreen: React.FC = () => {
       if (elapsed < duration) {
         rafId = requestAnimationFrame(tick);
       } else {
-        hideTimer = window.setTimeout(() => setIsVisible(false), 240);
+        hideTimer = window.setTimeout(dismissBoot, 180);
       }
     };
 
@@ -62,6 +77,7 @@ export const BootScreen: React.FC = () => {
     return () => {
       cancelAnimationFrame(rafId);
       clearTimeout(hideTimer);
+      clearTimeout(safetyTimer);
     };
   }, [isVisible]);
 
@@ -77,9 +93,12 @@ export const BootScreen: React.FC = () => {
           role="status"
           aria-live="polite"
           aria-label="Loading engineering portfolio"
+          onClick={dismissBoot}
           initial={{ opacity: 1 }}
-          exit={{ opacity: 0, scale: 1.012, transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] } }}
-          className="fixed inset-0 z-[100000] bg-[#ECECEB] flex flex-col items-center justify-center px-6 select-none"
+          exit={{ opacity: 0, transition: { duration: 0.3, ease: 'easeOut' } }}
+          className={`fixed inset-0 z-[100000] bg-[#ECECEB] flex flex-col items-center justify-center px-6 select-none transition-opacity ${
+            done ? 'pointer-events-none' : 'pointer-events-auto cursor-pointer'
+          }`}
           style={{
             backgroundImage:
               'radial-gradient(#B8B8B2 0.75px, transparent 0.75px), linear-gradient(to right, #D8D8D2 0.5px, transparent 0.5px), linear-gradient(to bottom, #D8D8D2 0.5px, transparent 0.5px)',
@@ -145,6 +164,10 @@ export const BootScreen: React.FC = () => {
                 {done ? '● ONLINE · READY' : '○ CALIBRATING...'}
               </span>
             </div>
+
+            <p className="text-center font-mono text-[9px] text-[#888884] pt-1">
+              Tap anywhere to enter workbench &rarr;
+            </p>
           </div>
         </motion.div>
       )}
