@@ -1215,6 +1215,7 @@ export const HeroSection: React.FC = () => {
             {/* Breadcrumb Eyebrow: Field Workbench · Pune, India */}
             <div
               ref={eyebrowRef}
+              data-parkour-surface="field-workbench"
               className="inline-flex items-center gap-2 font-mono text-xs sm:text-sm text-[#4E6E58] mb-4 bg-[#DFDFDC]/70 px-3 py-1 rounded border border-[#D0D0CB] shadow-sm select-none self-start"
             >
               <span className="h-1.5 w-1.5 rounded-full bg-[#FF5500] animate-pulse" />
@@ -1233,6 +1234,7 @@ export const HeroSection: React.FC = () => {
                 hey, i'm{' '}
                 <span
                   ref={badgeRef}
+                  data-parkour-surface="aakash-badge"
                   onClick={handleBadgeClick}
                   className="bg-[#FF5500] text-black px-2 py-0.5 rounded-sm inline-block select-none cursor-pointer transform-gpu shadow-sm hover:shadow-md transition-shadow"
                   title="Aakash Sharma · Click for tactile pulse"

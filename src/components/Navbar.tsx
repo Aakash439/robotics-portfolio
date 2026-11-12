@@ -75,7 +75,7 @@ export const Navbar: React.FC = () => {
   };
 
   return (
-    <header className="sticky top-0 z-50 h-14 bg-[#ECECEB]/95 backdrop-blur-md border-b border-[#D5D5D0] shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+    <header data-parkour-surface="navbar" className="sticky top-0 z-50 h-14 bg-[#ECECEB]/95 backdrop-blur-md border-b border-[#D5D5D0] shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="max-w-[1240px] mx-auto px-3 sm:px-8 h-full flex items-center justify-between">
         {/* Left: Dieter Rams / TE Identity Block */}
         <Link

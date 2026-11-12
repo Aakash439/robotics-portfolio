@@ -88,7 +88,10 @@ export const AboutSection: React.FC = () => {
 
           {/* Right 4 Cols: Actual Laboratory Workbench Photo */}
           <div className="lg:col-span-4">
-            <div className="relative h-72 rounded-xl overflow-hidden border border-[#D0D0CB] bg-[#DFDFDC] shadow-inner group">
+            <div
+              data-parkour-surface="about-card"
+              className="relative h-72 rounded-xl overflow-hidden border border-[#D0D0CB] bg-[#DFDFDC] shadow-inner group"
+            >
               <img
                 src="/images/workshop-bench.jpg"
                 alt="Field Workbench at JSPM Lab, Pune with soldering iron, multimeter, and robotic chassis"

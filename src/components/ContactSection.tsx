@@ -120,7 +120,10 @@ export const ContactSection: React.FC = () => {
       className="relative bg-[#ECECEB] py-20 sm:py-28 border-b border-[#D5D5D0]"
     >
       <div className="max-w-[1200px] mx-auto px-5 sm:px-8">
-        <div className="relative rounded-2xl bg-[#F5F5F3] border border-[#D5D5D0] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_2px_6px_rgba(0,0,0,0.05)] p-6 sm:p-8 md:p-12 grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+        <div
+          data-parkour-surface="contact-card"
+          className="relative rounded-2xl bg-[#F5F5F3] border border-[#D5D5D0] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_2px_6px_rgba(0,0,0,0.05)] p-6 sm:p-8 md:p-12 grid grid-cols-1 lg:grid-cols-12 gap-10 items-start"
+        >
           <CornerCrosshairs variant="screws" />
 
           {/* Left 5 Cols: Direct Comms, Live IST Clock & Physical Rockers */}
