@@ -6,6 +6,7 @@ import { BootScreen } from './components/BootScreen';
 import { WorkbenchRuler } from './components/WorkbenchRuler';
 import { BenchtopTestSuite } from './components/BenchtopTestSuite';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
+import { CustomCursor } from './components/CustomCursor';
 import { HomePage } from './pages/HomePage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { trackInstagramVisitor } from './utils/visitorTracker';
@@ -23,6 +24,7 @@ export const App: React.FC = () => {
       <div className="min-h-screen flex flex-col bg-[#ECECEB] text-[#111111] selection:bg-[#FF5500]/20 selection:text-[#111111] relative">
         <WorkbenchRuler />
         <BootScreen />
+        <CustomCursor />
         <BenchtopTestSuite />
         <KeyboardShortcuts />
         <Navbar />
