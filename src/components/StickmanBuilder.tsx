@@ -760,7 +760,6 @@ export const StickmanBuilder: React.FC = () => {
   return (
     <div
       ref={containerRef}
-      data-parkour-surface="robot-lab"
       onMouseEnter={() => (stateRef.current.isHovering = true)}
       onMouseLeave={() => (stateRef.current.isHovering = false)}
       className="relative rounded-xl bg-[#F5F5F3] border border-[#D5D5D0] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_2px_4px_rgba(0,0,0,0.03),0_8px_20px_-8px_rgba(0,0,0,0.06)] p-3.5 select-none group transition-all"

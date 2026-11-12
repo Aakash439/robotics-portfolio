@@ -7,7 +7,6 @@ import { WorkbenchRuler } from './components/WorkbenchRuler';
 import { BenchtopTestSuite } from './components/BenchtopTestSuite';
 import { KeyboardShortcuts } from './components/KeyboardShortcuts';
 import { CustomCursor } from './components/CustomCursor';
-import { ParkourRobot } from './components/ParkourRobot';
 import { HomePage } from './pages/HomePage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { trackInstagramVisitor } from './utils/visitorTracker';
@@ -26,7 +25,6 @@ export const App: React.FC = () => {
         <WorkbenchRuler />
         <BootScreen />
         <CustomCursor />
-        <ParkourRobot />
         <BenchtopTestSuite />
         <KeyboardShortcuts />
         <Navbar />

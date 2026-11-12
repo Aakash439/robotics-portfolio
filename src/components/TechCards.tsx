@@ -581,7 +581,6 @@ const ModularDatasheetCard: React.FC<{ project: ProjectWork; idx: number }> = ({
       onMouseMove={handleMouseMove}
       onTouchMove={handleTouchMove}
       data-dmm-target={project.slug.includes('motorguard') ? 'motorguard' : project.slug.includes('agv') ? 'agv' : 'project'}
-      data-parkour-surface="project-card"
       className="group relative rounded-xl bg-[#F5F5F3] border border-[#D5D5D0] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_2px_4px_rgba(0,0,0,0.03),0_12px_28px_-12px_rgba(0,0,0,0.06)] p-6 sm:p-8 md:p-10 mb-8 last:mb-0 overflow-hidden transform-gpu"
     >
       <CornerCrosshairs type="screw" />
