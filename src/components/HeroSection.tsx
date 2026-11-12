@@ -34,7 +34,6 @@ interface StageObject {
   h: number;
   vy: number;
   homeF: number;
-  inTransit?: boolean;
 }
 
 const MODES: { id: ArmControlMode; label: string }[] = [
@@ -60,11 +59,11 @@ export const HeroSection: React.FC = () => {
   const [armMode, setArmMode] = useState<ArmControlMode>('cursor');
   const [isClamped, setIsClamped] = useState(false);
   const [telemetry, setTelemetry] = useState({
-    theta1: -54,
+    theta1: -62,
     theta2: 68,
-    theta3: -14,
-    tcpX: 320,
-    tcpY: 180,
+    theta3: -12,
+    tcpX: 240,
+    tcpY: 140,
     vel: 0,
     mode: 'cursor' as ArmControlMode,
   });
@@ -197,13 +196,13 @@ export const HeroSection: React.FC = () => {
     }
   };
 
-  // State ref for high-performance canvas engine
+  // State ref for high-frequency canvas engine
   const stateRef = useRef({
-    normX: 0.65,
-    normY: 0.42,
+    normX: 0.62,
+    normY: 0.45,
     isHovering: false,
-    smoothX: 0.65,
-    smoothY: 0.42,
+    smoothX: 0.62,
+    smoothY: 0.45,
     velX: 0,
     velY: 0,
     prevTcpX: 0,
@@ -217,11 +216,10 @@ export const HeroSection: React.FC = () => {
     heldIndex: -1,
     heldOffX: 0,
     heldOffY: 0,
-    lastWristAngle: 0.3,
+    lastWristAngle: 0.8,
     lastGripX: 0,
     lastGripY: 0,
     objects: [] as StageObject[],
-    incomingObjects: [] as StageObject[],
     conveyorOffset: 0,
     layoutKey: '',
     auto: {
@@ -232,7 +230,6 @@ export const HeroSection: React.FC = () => {
       pickY: 0,
       destX: 0,
       destY: 0,
-      targetSlot: 0,
     },
     trail: [] as { x: number; y: number }[],
   });
@@ -241,6 +238,7 @@ export const HeroSection: React.FC = () => {
     const s = stateRef.current;
     s.mode = armMode;
     s.auto.phase = 'select';
+    s.trail = []; // Clear trail on mode change to prevent visual jump lines
   }, [armMode]);
 
   useEffect(() => {
@@ -264,29 +262,34 @@ export const HeroSection: React.FC = () => {
 
     const getGeo = () => {
       const minDim = Math.min(width, height);
-      const scale = Math.max(0.68, Math.min(1.05, width / 580));
-      // Base pedestal position anchored on table
-      const baseX = width * 0.3;
-      const baseY = height * 0.81;
+      const scale = Math.max(0.7, Math.min(1.05, width / 580));
+      // Ground table surface height
+      const tableY = height * 0.83;
+      // Shoulder pivot is elevated on an industrial casting riser:
+      const pedestalHeight = 44 * scale;
+      const baseX = width * 0.28;
+      const baseY = tableY - pedestalHeight;
       // Proportional link lengths
-      const L1 = minDim * 0.32; // Upper arm
-      const L2 = minDim * 0.26; // Forearm
-      const L3 = 36 * scale;    // Wrist to gripper center
-      const gripDist = 28 * scale;
-      const reach = Math.min((L1 + L2) * 0.985, width * 0.88 - baseX);
-      const minReach = Math.abs(L1 - L2) + 16 * scale;
-      const maxReach = (L1 + L2) * 0.985;
+      const L1 = minDim * 0.33; // Upper arm (~120-140px)
+      const L2 = minDim * 0.27; // Forearm (~100-115px)
+      const L3 = 34 * scale;    // Wrist to gripper center
+      const gripDist = 26 * scale;
+      // Natural reach envelope (compact sweet spot so arm stays arched)
+      const reach = (L1 + L2) * 0.94;
+      const minReach = Math.abs(L1 - L2) + 20 * scale;
+      const maxReach = (L1 + L2) * 0.96;
       const objW = 38 * scale;
-      const objH = 26 * scale;
-      return { minDim, scale, baseX, baseY, L1, L2, L3, gripDist, reach, minReach, maxReach, objW, objH };
+      const objH = 24 * scale;
+      return { minDim, scale, tableY, pedestalHeight, baseX, baseY, L1, L2, L3, gripDist, reach, minReach, maxReach, objW, objH };
     };
 
     const getTargetZone = () => {
       const g = getGeo();
-      const cx = g.baseX + g.reach * 0.45;
+      // Target PCB Tray positioned comfortably in 42% reach zone
+      const cx = g.baseX + g.reach * 0.42;
       const w = g.objW * 3.4;
       const h = g.objH * 1.5;
-      return { cx, x0: cx - w / 2, x1: cx + w / 2, y: g.baseY - h / 2, w, h };
+      return { cx, x0: cx - w / 2, x1: cx + w / 2, y: g.tableY - h / 2, w, h };
     };
 
     const inZone = (o: StageObject) => {
@@ -300,20 +303,20 @@ export const HeroSection: React.FC = () => {
       const s = stateRef.current;
       if (s.layoutKey === key) return;
       s.layoutKey = key;
-      const homeFs = [0.74, 0.86, 0.98];
+      // Home positions inside the 60% - 84% reach sweet spot (never stretched flat)
+      const homeFs = [0.62, 0.73, 0.84];
       s.heldIndex = -1;
       s.auto.phase = 'select';
       s.objects = ['SMD-0805', 'QFN-32', 'LM2596'].map((label, i) => ({
         id: i + 1,
         label,
         x: g.baseX + g.reach * homeFs[i],
-        y: g.baseY - g.objH / 2,
+        y: g.tableY - g.objH / 2,
         w: g.objW,
         h: g.objH,
         vy: 0,
         homeF: homeFs[i],
       }));
-      s.incomingObjects = [];
     };
 
     const resizeCanvas = () => {
@@ -325,25 +328,26 @@ export const HeroSection: React.FC = () => {
       canvas.height = Math.round(height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       layoutObjects();
+      stateRef.current.trail = [];
     };
 
-    // Strict Analytical Elbow-Up Inverse Kinematics Solver
+    // Strict Analytical Elbow-Up Inverse Kinematics Solver (Arched Industrial Geometry)
     const solveIK = (targetX: number, targetY: number, desiredWristAngle?: number) => {
       const g = getGeo();
-      const { baseX, baseY, L1, L2, L3, maxReach, minReach, scale } = g;
+      const { baseX, baseY, tableY, L1, L2, L3, maxReach, minReach, scale } = g;
 
-      // Table barrier: arm target never penetrates floor
-      const clampedX = Math.max(baseX + 26 * scale, Math.min(width * 0.95, targetX));
-      const clampedY = Math.max(height * 0.12, Math.min(baseY - 8 * scale, targetY));
+      // Table barrier: clamp target strictly above table
+      const clampedX = Math.max(baseX + 28 * scale, Math.min(baseX + maxReach, targetX));
+      const clampedY = Math.max(height * 0.12, Math.min(tableY - 8 * scale, targetY));
 
-      // Natural approach wrist angle: pitches downward (~85°-90°) when near table
+      // Natural approach wrist angle: pitches downward (~85°-90°) when approaching table
       let wristAngle: number;
       if (desiredWristAngle !== undefined) {
         wristAngle = desiredWristAngle;
       } else {
-        const heightFromTable = baseY - clampedY;
+        const heightFromTable = tableY - clampedY;
         const downBlend = Math.max(0, Math.min(1, 1 - heightFromTable / (160 * scale)));
-        wristAngle = 0.2 + downBlend * 1.35; // 0.2 rad (~11°) to 1.55 rad (89° down)
+        wristAngle = 0.2 + downBlend * 1.35; // 0.2 rad (~11°) to 1.55 rad (89° straight down)
       }
 
       // Wrist joint center
@@ -354,27 +358,27 @@ export const HeroSection: React.FC = () => {
       const dy = wristY - baseY;
       const dist = Math.max(minReach, Math.min(maxReach, Math.hypot(dx, dy)));
 
-      // Base to wrist angle (always upper quadrant, dy is negative)
+      // Base to wrist angle (since shoulder is elevated, dy is small or negative)
       const gamma = Math.atan2(dy, dx);
 
       // Law of cosines for elbow interior angle
       const cosAlpha = Math.max(
-        -0.98,
-        Math.min(0.98, (L1 * L1 + L2 * L2 - dist * dist) / (2 * L1 * L2))
+        -0.96,
+        Math.min(0.96, (L1 * L1 + L2 * L2 - dist * dist) / (2 * L1 * L2))
       );
       const alpha = Math.acos(cosAlpha);
 
-      // Relative elbow angle (strictly positive for Elbow-Up, guaranteed between 18° and 155°)
+      // Relative elbow angle (strictly positive for Elbow-Up, guaranteed between 25° and 155°)
       const thetaElbowRel = Math.PI - alpha;
 
       // Law of cosines for shoulder angle offset beta
       const cosBeta = Math.max(
-        -0.98,
-        Math.min(0.98, (L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist))
+        -0.96,
+        Math.min(0.96, (L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist))
       );
       const beta = Math.acos(cosBeta);
 
-      // Shoulder angle (elbow-up: subtract beta)
+      // Shoulder angle (elbow-up: subtract beta, always in arched upper quadrant [-85°, -25°])
       const theta1 = gamma - beta;
 
       // Joint positions
@@ -416,7 +420,7 @@ export const HeroSection: React.FC = () => {
 
       const s = stateRef.current;
       const g = getGeo();
-      const { scale, baseX, baseY, gripDist } = g;
+      const { scale, baseX, baseY, tableY, pedestalHeight, gripDist } = g;
       const zone = getTargetZone();
 
       let targetNormX = s.smoothX;
@@ -443,7 +447,6 @@ export const HeroSection: React.FC = () => {
         const atGoal = (gx: number, gy: number) =>
           Math.hypot(s.lastGripX - gx, s.lastGripY - gy) < 8 * scale;
 
-        // Grip status determination for auto sequence
         gripCommand =
           a.phase === 'grip' ||
           a.phase === 'lift' ||
@@ -462,16 +465,16 @@ export const HeroSection: React.FC = () => {
             a.pickX = o.x;
             a.pickY = o.y;
 
-            // Calculate neat designated slot inside the PCB Tray (3 slots)
+            // Slot spacing inside PCB tray
             const placedCount = s.objects.filter((obj) => inZone(obj)).length;
             const slotSpacing = zone.w / 3.8;
             a.destX = zone.cx - (1 - placedCount) * slotSpacing;
-            a.destY = baseY - o.h / 2;
+            a.destY = tableY - o.h / 2;
 
             go('approach');
             toTargetNorm(s.lastGripX, s.lastGripY);
           } else {
-            // ALL 3 BLOCKS PLACED! Enter inspection then smooth conveyor cycle
+            // ALL 3 BLOCKS PLACED! Smooth inspection and continuous conveyor cycle
             go('inspection');
           }
         } else if (a.phase === 'approach') {
@@ -504,7 +507,6 @@ export const HeroSection: React.FC = () => {
         } else if (a.phase === 'retreat') {
           toTargetNorm(a.destX, a.destY - lift);
           if (atGoal(a.destX, a.destY - lift) || elapsed > 1.0) {
-            // Check if all 3 are completed
             const unplaced = s.objects.findIndex((o) => !inZone(o));
             if (unplaced < 0) {
               go('inspection');
@@ -513,36 +515,32 @@ export const HeroSection: React.FC = () => {
             }
           }
         } else if (a.phase === 'inspection') {
-          // Park arm in ready stance while inspection runs
-          const homeX = baseX + g.reach * 0.58;
-          const homeY = baseY - 120 * scale;
+          const homeX = baseX + g.reach * 0.55;
+          const homeY = tableY - 130 * scale;
           toTargetNorm(homeX, homeY);
           if (elapsed > 1.4) {
             audioEngine.playRelayClick();
             go('conveyor_slide');
           }
         } else if (a.phase === 'conveyor_slide') {
-          const homeX = baseX + g.reach * 0.58;
-          const homeY = baseY - 120 * scale;
+          const homeX = baseX + g.reach * 0.55;
+          const homeY = tableY - 130 * scale;
           toTargetNorm(homeX, homeY);
 
-          // Continuous physical conveyor movement:
-          // The 3 placed blocks smoothly slide off to the left into the finished bin!
+          // Smooth continuous conveyor slide:
           s.objects.forEach((o) => {
             o.x -= dt * 170 * scale;
           });
           s.conveyorOffset += dt * 50 * scale;
 
-          // If the leftmost object has exited the stage, slide in fresh batch from the right
           if (elapsed > 2.0) {
             audioEngine.playMechanicalClick();
-            // Reset to home feeder positions smoothly
-            const homeFs = [0.74, 0.86, 0.98];
+            const homeFs = [0.62, 0.73, 0.84];
             s.objects = ['SMD-0805', 'QFN-32', 'LM2596'].map((label, i) => ({
               id: Date.now() + i,
               label,
               x: baseX + g.reach * homeFs[i],
-              y: baseY - g.objH / 2,
+              y: tableY - g.objH / 2,
               w: g.objW,
               h: g.objH,
               vy: 0,
@@ -552,25 +550,24 @@ export const HeroSection: React.FC = () => {
           }
         }
       } else if (s.mode === 'orbit') {
-        // LIVE KINEMATICS MODE: Follows cursor when hovering, or smooth orbital trajectory
+        // LIVE KINEMATICS: Responsive cursor control with smooth orbital ambient
         if (s.isHovering) {
           targetNormX = s.normX;
           targetNormY = s.normY;
         } else {
-          targetNormX = 0.62 + Math.cos(t * 1.6) * 0.14;
-          targetNormY = 0.42 + Math.sin(t * 1.6) * 0.15;
+          targetNormX = 0.60 + Math.cos(t * 1.6) * 0.12;
+          targetNormY = 0.42 + Math.sin(t * 1.6) * 0.14;
         }
       } else if (s.isHovering) {
-        // CAD WIREFRAME MODE: Follows cursor directly
+        // CAD WIREFRAME: Direct cursor guidance
         targetNormX = s.normX;
         targetNormY = s.normY;
       } else if (!reduceMotion && s.heldIndex < 0) {
-        // Subtle ambient idle breathing
-        targetNormX = 0.62 + Math.cos(t * 0.8) * 0.12;
-        targetNormY = 0.38 + Math.sin(t * 1.3) * 0.1;
+        targetNormX = 0.60 + Math.cos(t * 0.8) * 0.1;
+        targetNormY = 0.40 + Math.sin(t * 1.3) * 0.08;
       }
 
-      // Smooth kinematic spring damping
+      // Kinematic spring damping
       const stiffness = s.mode === 'pick-place' ? 0.095 : 0.088;
       const damping = 0.82;
       s.velX = (s.velX + (targetNormX - s.smoothX) * stiffness) * damping;
@@ -578,7 +575,7 @@ export const HeroSection: React.FC = () => {
       s.smoothX += s.velX;
       s.smoothY += s.velY;
 
-      // Solve inverse kinematics for current position
+      // Solve inverse kinematics for current smooth position
       const rawTargetX = s.smoothX * width;
       const rawTargetY = s.smoothY * height;
       const ik = solveIK(rawTargetX, rawTargetY);
@@ -597,7 +594,6 @@ export const HeroSection: React.FC = () => {
       s.prevTcpY = ik.tcpY;
 
       // ----------------- MANUAL INTERACTIVE GRIPPER & OBJECT PHYSICS -----------------
-      // Detect nearest grippable object
       const findGrippable = () => {
         let best = -1;
         let bestD = Infinity;
@@ -631,23 +627,28 @@ export const HeroSection: React.FC = () => {
       s.prevGrip = gripCommand;
       const hoverIndex = s.heldIndex < 0 ? findGrippable() : -1;
 
-      // Update positions of objects (held vs table-resting)
+      // Update positions of objects
       s.objects.forEach((o, i) => {
         if (i === s.heldIndex) {
           s.heldOffX *= 0.85;
           s.heldOffY *= 0.85;
           o.x = gripX + s.heldOffX;
-          o.y = Math.min(gripY + s.heldOffY, baseY - o.h / 2);
+          o.y = Math.min(gripY + s.heldOffY, tableY - o.h / 2);
         } else if (s.auto.phase !== 'conveyor_slide') {
-          o.y = baseY - o.h / 2;
+          o.y = tableY - o.h / 2;
         }
       });
 
       const holding = s.heldIndex >= 0;
 
-      // Motion trail
-      s.trail.push({ x: ik.tcpX, y: ik.tcpY });
-      if (s.trail.length > 36) s.trail.shift();
+      // Clean motion trail: only add if robot actually moved and within reasonable distance
+      if (distTraveled > 1.5 && distTraveled < 40 * scale) {
+        s.trail.push({ x: ik.tcpX, y: ik.tcpY });
+        if (s.trail.length > 28) s.trail.shift();
+      } else if (distTraveled >= 40 * scale) {
+        // Discontinuity (jump): clear trail
+        s.trail = [];
+      }
 
       // Gripper Jaw Physics
       const jawTarget = gripCommand ? 0.95 : 0.15;
@@ -663,7 +664,7 @@ export const HeroSection: React.FC = () => {
           theta2: Math.round(((ik.theta2 - ik.theta1) * 180) / Math.PI),
           theta3: Math.round((ik.wristAngle * 180) / Math.PI),
           tcpX: Math.round(ik.tcpX - baseX),
-          tcpY: Math.round(baseY - ik.tcpY),
+          tcpY: Math.round(tableY - ik.tcpY),
           vel: Math.round(s.instantSpeed),
           mode: s.mode,
         });
@@ -693,7 +694,7 @@ export const HeroSection: React.FC = () => {
           ctx.stroke();
         }
       } else {
-        // Clean Dieter Rams Industrial Grid
+        // Clean Dieter Rams Industrial Workshop Grid
         ctx.strokeStyle = 'rgba(0, 0, 0, 0.04)';
         ctx.lineWidth = 1;
         const step = 20 * scale;
@@ -711,29 +712,37 @@ export const HeroSection: React.FC = () => {
         }
       }
 
+      // ----------------- 2. TABLE SURFACE & CONVEYOR RUNNER -----------------
+      // Workshop Table Ground Line
+      ctx.strokeStyle = s.mode === 'cursor' ? 'rgba(0, 240, 255, 0.25)' : '#D0D0CB';
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(0, tableY);
+      ctx.lineTo(width, tableY);
+      ctx.stroke();
+
       // Reach envelope arcs
-      [0.32, 0.55, 0.78].forEach((rFactor, idx) => {
+      [0.35, 0.58, 0.82].forEach((rFactor, idx) => {
         ctx.strokeStyle = s.mode === 'cursor'
           ? `rgba(0, 240, 255, ${0.14 - idx * 0.03})`
-          : `rgba(0, 0, 0, ${0.1 - idx * 0.025})`;
+          : `rgba(0, 0, 0, ${0.08 - idx * 0.02})`;
         ctx.lineWidth = 1;
         ctx.setLineDash([4, 4]);
         ctx.beginPath();
-        ctx.arc(baseX, baseY, width * rFactor, -Math.PI * 0.88, -Math.PI * 0.08);
+        ctx.arc(baseX, baseY, width * rFactor, -Math.PI * 0.85, -Math.PI * 0.1);
         ctx.stroke();
         ctx.setLineDash([]);
       });
 
-      // ----------------- 2. TARGET PCB TRAY (Center-Left) -----------------
+      // ----------------- 3. TARGET PCB TRAY (Center-Left) -----------------
       ctx.save();
       ctx.fillStyle = s.mode === 'cursor' ? 'rgba(0, 240, 255, 0.06)' : '#E2E2DF';
-      ctx.strokeStyle = inZone(s.objects[0] || {} as StageObject) && inZone(s.objects[1] || {} as StageObject) && inZone(s.objects[2] || {} as StageObject)
-        ? '#10B981'
-        : '#30D158';
+      const allInZone = s.objects.length > 0 && s.objects.every((o) => inZone(o));
+      ctx.strokeStyle = allInZone ? '#10B981' : '#30D158';
       ctx.lineWidth = 1.6;
       ctx.setLineDash([5, 4]);
       ctx.beginPath();
-      ctx.roundRect(zone.x0, baseY - 14 * scale, zone.w, 18 * scale, 4 * scale);
+      ctx.roundRect(zone.x0, tableY - 14 * scale, zone.w, 18 * scale, 4 * scale);
       ctx.fill();
       ctx.stroke();
       ctx.setLineDash([]);
@@ -745,40 +754,39 @@ export const HeroSection: React.FC = () => {
       ctx.textAlign = 'center';
       if (s.auto.phase === 'inspection') {
         ctx.fillStyle = '#10B981';
-        ctx.fillText('AOI: 100% PASS · QC VERIFIED', zone.cx, baseY + 18 * scale);
+        ctx.fillText('AOI: 100% PASS · QC VERIFIED', zone.cx, tableY + 16 * scale);
       } else if (s.auto.phase === 'conveyor_slide') {
         ctx.fillStyle = '#FF5C00';
-        ctx.fillText('BATCH DISPATCHING · CONVEYOR ACTIVE', zone.cx, baseY + 18 * scale);
+        ctx.fillText('BATCH DISPATCHING · CONVEYOR ACTIVE', zone.cx, tableY + 16 * scale);
       } else {
-        ctx.fillText('Target PCB Tray (Drop Components Here)', zone.cx, baseY + 18 * scale);
+        ctx.fillText('Target PCB Tray (Drop Components Here)', zone.cx, tableY + 16 * scale);
       }
       ctx.textAlign = 'left';
 
-      // ----------------- 3. MOTION TRAIL -----------------
-      if (s.trail.length > 2) {
-        ctx.beginPath();
-        s.trail.forEach((pt, idx) => {
-          if (idx === 0) ctx.moveTo(pt.x, pt.y);
-          else ctx.lineTo(pt.x, pt.y);
-        });
-
-        if (s.mode === 'cursor') {
-          ctx.strokeStyle = 'rgba(0, 240, 255, 0.4)';
-          ctx.lineWidth = 1.6;
-          ctx.setLineDash([3, 3]);
-        } else {
-          const trailGrad = ctx.createLinearGradient(s.trail[0].x, s.trail[0].y, ik.tcpX, ik.tcpY);
-          trailGrad.addColorStop(0, 'rgba(255, 92, 0, 0)');
-          trailGrad.addColorStop(1, holding ? 'rgba(16, 185, 129, 0.9)' : 'rgba(255, 92, 0, 0.95)');
-          ctx.strokeStyle = trailGrad;
-          ctx.lineWidth = 2.2;
-          ctx.setLineDash([]);
+      // ----------------- 4. MOTION TRAIL (Clean, Segmented, Discontinuity-Safe) -----------------
+      if (s.trail.length > 1) {
+        for (let i = 1; i < s.trail.length; i++) {
+          const p1 = s.trail[i - 1];
+          const p2 = s.trail[i];
+          const segDist = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+          // Only draw continuous segment if points are adjacent (prevents screen-crossing lines)
+          if (segDist < 35 * scale) {
+            const alpha = (i / s.trail.length) * 0.75;
+            ctx.strokeStyle = s.mode === 'cursor'
+              ? `rgba(0, 240, 255, ${alpha})`
+              : holding
+              ? `rgba(16, 185, 129, ${alpha})`
+              : `rgba(255, 92, 0, ${alpha})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(p1.x, p1.y);
+            ctx.lineTo(p2.x, p2.y);
+            ctx.stroke();
+          }
         }
-        ctx.stroke();
-        ctx.setLineDash([]);
       }
 
-      // ----------------- 4. SMD ELECTRONIC COMPONENTS (Interactive!) -----------------
+      // ----------------- 5. SMD ELECTRONIC COMPONENTS (Interactive!) -----------------
       s.objects.forEach((o, i) => {
         const isHeld = i === s.heldIndex;
         const isHover = i === hoverIndex;
@@ -830,38 +838,44 @@ export const HeroSection: React.FC = () => {
         ctx.textAlign = 'left';
       });
 
-      // ----------------- 5. BASE PEDESTAL -----------------
+      // ----------------- 6. CAST INDUSTRIAL RISER PEDESTAL -----------------
+      // Elevates shoulder pivot 44px above table for natural high-arched reach
       ctx.save();
       if (s.mode === 'cursor') {
         ctx.strokeStyle = '#00F0FF';
-        ctx.lineWidth = 1.5;
-        ctx.strokeRect(baseX - 28 * scale, baseY, 56 * scale, 12 * scale);
-        ctx.strokeRect(baseX - 18 * scale, baseY - 6 * scale, 36 * scale, 6 * scale);
+        ctx.lineWidth = 1.4;
+        // Table flanged base plate
+        ctx.strokeRect(baseX - 26 * scale, tableY - 6 * scale, 52 * scale, 6 * scale);
+        // Riser column
+        ctx.strokeRect(baseX - 16 * scale, baseY, 32 * scale, pedestalHeight);
       } else {
+        // Table flanged base plate
         ctx.fillStyle = '#18181B';
         ctx.strokeStyle = '#3F3F46';
         ctx.lineWidth = 1.6;
         ctx.beginPath();
-        ctx.roundRect(baseX - 30 * scale, baseY, 60 * scale, 14 * scale, 2.5 * scale);
+        ctx.roundRect(baseX - 28 * scale, tableY - 8 * scale, 56 * scale, 8 * scale, 2 * scale);
         ctx.fill();
         ctx.stroke();
 
-        ctx.fillStyle = '#27272A';
+        // Heavy ribbed casting riser pillar
+        ctx.fillStyle = '#222226';
         ctx.beginPath();
-        ctx.roundRect(baseX - 18 * scale, baseY - 6 * scale, 36 * scale, 7 * scale, 2 * scale);
+        ctx.roundRect(baseX - 16 * scale, baseY, 32 * scale, pedestalHeight, 2 * scale);
         ctx.fill();
         ctx.stroke();
 
+        // Anchor bolts
         [-18, 0, 18].forEach((bx) => {
           ctx.fillStyle = '#71717A';
           ctx.beginPath();
-          ctx.arc(baseX + bx * scale, baseY + 7 * scale, 2 * scale, 0, Math.PI * 2);
+          ctx.arc(baseX + bx * scale, tableY - 4 * scale, 1.8 * scale, 0, Math.PI * 2);
           ctx.fill();
         });
       }
       ctx.restore();
 
-      // ----------------- 6. ROBOTIC ARM LINKS -----------------
+      // ----------------- 7. ROBOTIC ARM LINKS -----------------
       const drawLink = (
         x1: number,
         y1: number,
@@ -938,12 +952,12 @@ export const HeroSection: React.FC = () => {
         ctx.restore();
       };
 
-      // Draw the 3 links with guaranteed elbow-up geometry
+      // Draw the 3 links with guaranteed high-arched industrial geometry
       drawLink(baseX, baseY, ik.elbowX, ik.elbowY, 26 * scale, 20 * scale);
       drawLink(ik.elbowX, ik.elbowY, ik.wristX, ik.wristY, 20 * scale, 16 * scale);
       drawLink(ik.wristX, ik.wristY, ik.tcpX, ik.tcpY, 15 * scale, 12 * scale);
 
-      // ----------------- 7. ROTARY PIVOTS & COORDINATE FRAMES -----------------
+      // ----------------- 8. ROTARY PIVOTS & COORDINATE FRAMES -----------------
       const drawCoordinateFrame = (x: number, y: number, angle: number, label: string) => {
         const axisLen = 20 * scale;
         ctx.save();
@@ -1045,7 +1059,7 @@ export const HeroSection: React.FC = () => {
         ctx.restore();
       }
 
-      // ----------------- 8. GRIPPER END-EFFECTOR -----------------
+      // ----------------- 9. GRIPPER END-EFFECTOR -----------------
       ctx.save();
       ctx.translate(ik.tcpX, ik.tcpY);
       ctx.rotate(ik.wristAngle);
@@ -1085,7 +1099,7 @@ export const HeroSection: React.FC = () => {
       // Dynamic Velocity Vector in Live Kinematics
       if (s.mode === 'orbit' && s.instantSpeed > 6) {
         ctx.save();
-        const vLen = Math.min(50 * scale, s.instantSpeed * 0.16 * scale);
+        const vLen = Math.min(45 * scale, s.instantSpeed * 0.15 * scale);
         const vAngle = Math.atan2(ik.tcpY - s.prevTcpY, ik.tcpX - s.prevTcpX);
         ctx.strokeStyle = '#10B981';
         ctx.lineWidth = 2.2;
@@ -1135,8 +1149,8 @@ export const HeroSection: React.FC = () => {
     const x = (clientX - rect.left) / rect.width;
     const y = (clientY - rect.top) / rect.height;
     const s = stateRef.current;
-    s.normX = Math.max(0.1, Math.min(0.92, x));
-    s.normY = Math.max(0.12, Math.min(0.88, y));
+    s.normX = Math.max(0.12, Math.min(0.92, x));
+    s.normY = Math.max(0.12, Math.min(0.86, y));
     s.isHovering = true;
   };
 
@@ -1177,10 +1191,10 @@ export const HeroSection: React.FC = () => {
         s.normX = s.smoothX;
         s.normY = s.smoothY;
       }
-      if (e.key === 'ArrowLeft') s.normX = Math.max(0.1, s.normX - step);
+      if (e.key === 'ArrowLeft') s.normX = Math.max(0.12, s.normX - step);
       if (e.key === 'ArrowRight') s.normX = Math.min(0.92, s.normX + step);
       if (e.key === 'ArrowUp') s.normY = Math.max(0.12, s.normY - step);
-      if (e.key === 'ArrowDown') s.normY = Math.min(0.88, s.normY + step);
+      if (e.key === 'ArrowDown') s.normY = Math.min(0.86, s.normY + step);
       s.isHovering = true;
     } else if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
@@ -1288,7 +1302,10 @@ export const HeroSection: React.FC = () => {
             tabIndex={0}
             aria-label="Interactive robotic arm. Move pointer to control gripper; click or press Space to grip and release components manually."
             onMouseMove={(e) => setPointer(e.clientX, e.clientY)}
-            onMouseLeave={() => (stateRef.current.isHovering = false)}
+            onMouseLeave={() => {
+              stateRef.current.isHovering = false;
+              stateRef.current.trail = [];
+            }}
             onTouchStart={(e) =>
               e.touches[0] && setPointer(e.touches[0].clientX, e.touches[0].clientY)
             }
@@ -1304,14 +1321,14 @@ export const HeroSection: React.FC = () => {
             <CornerCrosshairs type="crosshair" />
 
             {/* Top Control Strip */}
-            <div className="relative z-10 px-4 sm:px-6 pt-3.5 sm:pt-4 flex flex-wrap items-center justify-between gap-3 bg-[#DFDFDC]/80 border-b border-[#D0D0CA] pb-3 backdrop-blur-sm">
+            <div className="relative z-10 px-4 sm:px-6 pt-3.5 sm:pt-4 flex flex-wrap items-center justify-between gap-3 bg-[#DFDFDC]/85 border-b border-[#D0D0CA] pb-3 backdrop-blur-sm">
               <div className="flex items-center gap-2.5 pointer-events-none min-w-0">
                 <span className="h-2 w-2 rounded-full bg-[#FF5500] shadow-[0_0_6px_#FF5500] shrink-0" />
                 <span className="font-sans text-xs font-bold text-[#111111] uppercase tracking-wider truncate">
                   Articulated Manipulator &amp; Gripper Stage
                 </span>
                 <span className="font-mono text-[9px] font-bold text-white uppercase px-2 py-0.5 rounded bg-[#111111] shadow-sm">
-                  REV 4.2
+                  REV 4.3
                 </span>
               </div>
 
@@ -1364,31 +1381,14 @@ export const HeroSection: React.FC = () => {
               </div>
             </div>
 
-            {/* Live Kinematic Telemetry HUD (Top-Right Floating Overlay) */}
-            <div className="absolute top-16 right-4 sm:right-6 z-10 pointer-events-none flex flex-col items-end gap-1 font-mono text-[10px]">
-              <div className="bg-[#18181B]/85 text-white backdrop-blur-md px-3 py-1.5 rounded border border-[#3F3F46] shadow-sm flex items-center gap-3">
-                <span className="text-[#38BDF8] font-bold">
-                  θ1: {telemetry.theta1}° | θ2: {telemetry.theta2}° | θ3: {telemetry.theta3}°
-                </span>
-                <span className="text-[#A1A1AA]">
-                  TCP [X: {telemetry.tcpX}mm, Y: {telemetry.tcpY}mm]
-                </span>
-                {armMode === 'orbit' && (
-                  <span className="text-[#10B981] font-bold">
-                    v: {telemetry.vel} mm/s
-                  </span>
-                )}
-              </div>
-            </div>
-
             <canvas
               ref={canvasRef}
               aria-hidden="true"
               className="absolute inset-0 w-full h-full block"
             />
 
-            {/* Bottom Status Ribbon */}
-            <div className="absolute bottom-3 sm:bottom-3.5 left-4 sm:left-6 right-4 sm:right-6 z-10 flex items-center justify-between gap-2 pointer-events-none">
+            {/* Bottom Status Ribbon with Docked Digital Telemetry HUD (Zero Overlap!) */}
+            <div className="absolute bottom-3 sm:bottom-3.5 left-4 sm:left-6 right-4 sm:right-6 z-10 flex flex-wrap items-center justify-between gap-2 pointer-events-none">
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded bg-[#DFDFDC]/90 border border-[#C8C8C2] font-mono text-[10px] text-[#222220] font-semibold shadow-sm max-w-full truncate">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] shrink-0" />
                 <span className="truncate">
@@ -1400,9 +1400,20 @@ export const HeroSection: React.FC = () => {
                 </span>
               </span>
 
-              <span className="font-mono text-[10px] text-[#666662] font-medium hidden sm:inline shrink-0 bg-[#DFDFDC]/80 px-2.5 py-1 rounded border border-[#C8C8C2]">
-                Hover chip &amp; click to grab · Drag and drop anywhere
-              </span>
+              {/* Hardware LCD Telemetry Readout (Cleanly Docked in Bottom Bar) */}
+              <div className="bg-[#18181B]/90 text-white backdrop-blur-md px-3 py-1 rounded border border-[#3F3F46] shadow-sm flex items-center gap-2.5 font-mono text-[10px] shrink-0">
+                <span className="text-[#38BDF8] font-bold">
+                  θ1: {telemetry.theta1}° · θ2: {telemetry.theta2}° · θ3: {telemetry.theta3}°
+                </span>
+                <span className="text-[#D4D4D8] hidden md:inline">
+                  [X: {telemetry.tcpX}mm, Y: {telemetry.tcpY}mm]
+                </span>
+                {armMode === 'orbit' && (
+                  <span className="text-[#10B981] font-bold">
+                    v: {telemetry.vel} mm/s
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         </motion.div>
