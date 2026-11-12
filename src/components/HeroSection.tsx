@@ -9,7 +9,7 @@ import { gsap } from '../utils/gsapAnimations';
 
 const STUDIO_EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
-type ArmControlMode = 'cursor' | 'pick-place' | 'orbit';
+type ArmControlMode = 'cursor' | 'orbit' | 'pick-place';
 
 type AutoPhase =
   | 'select'
@@ -21,22 +21,21 @@ type AutoPhase =
   | 'lower'
   | 'release'
   | 'retreat'
+  | 'aoi_scan'
+  | 'dispatch'
   | 'home';
 
-interface StageObject {
+interface FeederPart {
+  id: number;
   label: string;
-  x: number;
-  y: number;
   w: number;
   h: number;
-  vy: number;
-  homeF: number;
 }
 
-const MODES: { id: ArmControlMode; label: string }[] = [
-  { id: 'cursor', label: 'CAD Wireframe' },
-  { id: 'orbit', label: 'Live Kinematics' },
-  { id: 'pick-place', label: 'Pick & Place' },
+const MODES: { id: ArmControlMode; label: string; badge: string }[] = [
+  { id: 'cursor', label: 'CAD Wireframe', badge: 'SCHEMATIC' },
+  { id: 'orbit', label: 'Live Kinematics', badge: 'TELEMETRY' },
+  { id: 'pick-place', label: 'Pick & Place', badge: 'SMT CELL' },
 ];
 
 export const HeroSection: React.FC = () => {
@@ -55,6 +54,17 @@ export const HeroSection: React.FC = () => {
 
   const [armMode, setArmMode] = useState<ArmControlMode>('cursor');
   const [isClamped, setIsClamped] = useState(false);
+  const [isEStopped, setIsEStopped] = useState(false);
+  const [isTrajectoryTest, setIsTrajectoryTest] = useState(false);
+  const [telemetry, setTelemetry] = useState({
+    theta1: -50,
+    theta2: 65,
+    theta3: -15,
+    tcpX: 320,
+    tcpY: 180,
+    vel: 0,
+    mode: 'cursor' as ArmControlMode,
+  });
 
   // GSAP Entrance Timeline: Staggered mechanical reveal
   useEffect(() => {
@@ -184,49 +194,67 @@ export const HeroSection: React.FC = () => {
     }
   };
 
+  // State ref for high-frequency 60fps canvas render loop
   const stateRef = useRef({
-    normX: 0.64,
-    normY: 0.4,
+    normX: 0.65,
+    normY: 0.42,
     isHovering: false,
-    smoothX: 0.64,
-    smoothY: 0.4,
+    smoothX: 0.65,
+    smoothY: 0.42,
     velX: 0,
     velY: 0,
-    smoothJaw: 0.3,
+    prevTcpX: 0,
+    prevTcpY: 0,
+    instantSpeed: 0,
+    smoothJaw: 0.2,
     mode: 'cursor' as ArmControlMode,
     clamped: false,
-    prevGrip: false,
-    gripArmedUntil: 0,
-    heldIndex: -1,
-    heldOffX: 0,
-    heldOffY: 0,
-    lastWristAngle: -0.15,
-    lastGripX: 0,
-    lastGripY: 0,
-    objects: [] as StageObject[],
-    layoutKey: '',
+    eStopped: false,
+    trajTest: false,
+    heldPart: null as FeederPart | null,
+    // Pick & Place State Machine
+    feederParts: [
+      { id: 1, label: 'SMD-0805', w: 34, h: 22 },
+      { id: 2, label: 'QFN-32', w: 38, h: 26 },
+      { id: 3, label: 'LM2596', w: 42, h: 28 },
+    ] as FeederPart[],
+    pcbSlots: [null, null, null] as (FeederPart | null)[],
+    feederBeltOffset: 0,
+    pcbSlideOffset: 0, // 0 = centered, negative = exiting left, positive = entering right
+    aoiScanProgress: 0,
+    aoiLaserActive: false,
+    dispatchPhase: 'idle' as 'idle' | 'scanning' | 'sliding_out' | 'sliding_in',
     auto: {
       phase: 'select' as AutoPhase,
       phaseStart: 0,
-      index: -1,
+      activeSlotIdx: 0,
       pickX: 0,
       pickY: 0,
       destX: 0,
       destY: 0,
     },
-    trail: [] as { x: number; y: number }[],
+    trail: [] as { x: number; y: number; vel: number }[],
   });
 
+  // Sync React states to ref
   useEffect(() => {
-    const s = stateRef.current;
-    s.mode = armMode;
-    s.auto.phase = 'select';
+    stateRef.current.mode = armMode;
+    stateRef.current.auto.phase = 'select';
   }, [armMode]);
 
   useEffect(() => {
     stateRef.current.clamped = isClamped;
   }, [isClamped]);
 
+  useEffect(() => {
+    stateRef.current.eStopped = isEStopped;
+  }, [isEStopped]);
+
+  useEffect(() => {
+    stateRef.current.trajTest = isTrajectoryTest;
+  }, [isTrajectoryTest]);
+
+  // Master Canvas Animation & Simulation Engine
   useEffect(() => {
     const canvas = canvasRef.current;
     const stage = stageRef.current;
@@ -238,50 +266,24 @@ export const HeroSection: React.FC = () => {
 
     let animationFrameId = 0;
     let running = false;
-    let isOnScreen = true;
     let width = 0;
     let height = 0;
 
-    const geo = () => {
+    // Geometric parameters calculated dynamically
+    const getGeo = () => {
       const minDim = Math.min(width, height);
-      const scale = Math.max(0.68, Math.min(1, width / 560));
-      const baseX = width * 0.33;
-      const baseY = height * 0.81;
-      const L1 = minDim * 0.33;
-      const L2 = minDim * 0.27;
-      const L3 = minDim * 0.135;
-      const gripDist = 32 * scale;
-      const reach = Math.min(L1 + L2 + L3, width * 0.86 - baseX);
-      const objW = 38 * scale;
-      const objH = 28 * scale;
-      return { minDim, scale, baseX, baseY, L1, L2, L3, gripDist, reach, objW, objH };
-    };
-
-    const zoneOf = () => {
-      const g = geo();
-      const cx = g.baseX + g.reach * 0.44;
-      const w = g.objW * 1.9;
-      return { cx, x0: cx - w / 2, x1: cx + w / 2, w };
-    };
-
-    const layoutObjects = () => {
-      const g = geo();
-      const key = `${Math.round(width)}x${Math.round(height)}`;
-      const s = stateRef.current;
-      if (s.layoutKey === key) return;
-      s.layoutKey = key;
-      const homeFs = [0.82, 0.95, 0.68, 0.55];
-      s.heldIndex = -1;
-      s.auto.phase = 'select';
-      s.objects = ['SMD-0805', 'QFN-32', 'LM2596'].map((label, i) => ({
-        label,
-        x: g.baseX + g.reach * homeFs[i],
-        y: g.baseY - g.objH / 2,
-        w: g.objW,
-        h: g.objH,
-        vy: 0,
-        homeF: homeFs[i],
-      }));
+      const scale = Math.max(0.68, Math.min(1.08, width / 580));
+      // Anchor base securely on table
+      const baseX = width * 0.28;
+      const baseY = height * 0.82;
+      // Proportional link lengths for smooth, realistic articulated kinematics
+      const L1 = minDim * 0.32; // Upper arm
+      const L2 = minDim * 0.26; // Forearm
+      const L3 = 38 * scale;    // Wrist to gripper center
+      const gripDist = 28 * scale;
+      const maxReach = (L1 + L2) * 0.985;
+      const minReach = Math.abs(L1 - L2) + 16 * scale;
+      return { minDim, scale, baseX, baseY, L1, L2, L3, gripDist, maxReach, minReach };
     };
 
     const resizeCanvas = () => {
@@ -292,332 +294,662 @@ export const HeroSection: React.FC = () => {
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      layoutObjects();
     };
 
-    const inZone = (o: StageObject) => {
-      const z = zoneOf();
-      return o.x > z.x0 && o.x < z.x1;
-    };
+    // Robust Analytical 3-DOF Planar Inverse Kinematics Solver (Strictly Elbow-Up)
+    const solveIK = (targetX: number, targetY: number, desiredWristAngle?: number) => {
+      const { baseX, baseY, L1, L2, L3, maxReach, minReach, scale } = getGeo();
 
-    const startTime = performance.now();
+      // Clamp target within workspace hemisphere above table
+      const clampedX = Math.max(baseX + 28 * scale, Math.min(width * 0.94, targetX));
+      const clampedY = Math.max(height * 0.12, Math.min(baseY - 10 * scale, targetY));
 
-    const render = (now: number) => {
-      if (!running) return;
-      const t = (now - startTime) * 0.001;
-      const s = stateRef.current;
-      const g = geo();
-      const { scale, baseX, baseY, L1, L2, L3, gripDist } = g;
-
-      let targetNormX = s.smoothX;
-      let targetNormY = s.smoothY;
-      let gripCommand = s.clamped;
-
-      const toTargetNorm = (gx: number, gy: number) => {
-        const tx = gx - Math.cos(s.lastWristAngle) * gripDist;
-        const ty = gy - Math.sin(s.lastWristAngle) * gripDist;
-        targetNormX = tx / width;
-        targetNormY = ty / height;
-      };
-
-      // ---------------- Interactive Pick & Place Routine ----------------
-      if (s.mode === 'pick-place') {
-        const a = s.auto;
-        const elapsed = t - a.phaseStart;
-        const go = (phase: AutoPhase) => {
-          a.phase = phase;
-          a.phaseStart = t;
-        };
-        const lift = 60 * scale;
-        const atGoal = (gx: number, gy: number) =>
-          Math.hypot(s.lastGripX - gx, s.lastGripY - gy) < 6 * scale;
-
-        gripCommand =
-          a.phase === 'grip' ||
-          a.phase === 'lift' ||
-          a.phase === 'transit' ||
-          a.phase === 'lower';
-
-        // Synchronize React state status pill
-        if (gripCommand !== isClamped) {
-          setIsClamped(gripCommand);
-        }
-
-        if (a.phase === 'select') {
-          gripCommand = false;
-          // Find component to pick
-          let idx = s.objects.findIndex((o) => !inZone(o));
-          if (idx < 0) {
-            // Reset to pick again
-            idx = 0;
-            s.objects[0].x = baseX + g.reach * 0.82;
-            s.objects[0].y = baseY - s.objects[0].h / 2;
-          }
-          const o = s.objects[idx];
-          a.index = idx;
-          a.pickX = o.x;
-          a.pickY = o.y;
-          a.destX = zoneOf().cx;
-          a.destY = baseY - o.h / 2;
-          go('approach');
-          toTargetNorm(s.lastGripX, s.lastGripY);
-        } else if (a.phase === 'approach') {
-          toTargetNorm(a.pickX, a.pickY - lift);
-          if (atGoal(a.pickX, a.pickY - lift) || elapsed > 1.4) go('descend');
-        } else if (a.phase === 'descend') {
-          toTargetNorm(a.pickX, a.pickY);
-          if (atGoal(a.pickX, a.pickY) || elapsed > 1.2) {
-            audioEngine.playRelayClick();
-            go('grip');
-          }
-        } else if (a.phase === 'grip') {
-          toTargetNorm(a.pickX, a.pickY);
-          if (elapsed > 0.4) go('lift');
-        } else if (a.phase === 'lift') {
-          toTargetNorm(a.pickX, a.pickY - lift);
-          if (atGoal(a.pickX, a.pickY - lift) || elapsed > 1.2) go('transit');
-        } else if (a.phase === 'transit') {
-          toTargetNorm(a.destX, a.destY - lift);
-          if (atGoal(a.destX, a.destY - lift) || elapsed > 1.6) go('lower');
-        } else if (a.phase === 'lower') {
-          toTargetNorm(a.destX, a.destY);
-          if (atGoal(a.destX, a.destY) || elapsed > 1.2) {
-            audioEngine.playMechanicalClick();
-            go('release');
-          }
-        } else if (a.phase === 'release') {
-          toTargetNorm(a.destX, a.destY);
-          if (elapsed > 0.4) go('retreat');
-        } else if (a.phase === 'retreat') {
-          toTargetNorm(a.destX, a.destY - lift);
-          if (atGoal(a.destX, a.destY - lift) || elapsed > 1.1) go('home');
-        } else if (a.phase === 'home') {
-          const homeX = baseX + g.reach * 0.62;
-          const homeY = baseY - 120 * scale;
-          toTargetNorm(homeX, homeY);
-          if (elapsed > 2.0) go('select');
-        }
-      } else if (s.mode === 'orbit') {
-        targetNormX = 0.63 + Math.cos(t * 1.9) * 0.14;
-        targetNormY = 0.43 + Math.sin(t * 1.9) * 0.16;
-      } else if (s.isHovering) {
-        targetNormX = s.normX;
-        targetNormY = s.normY;
-      } else if (!reduceMotion && s.heldIndex < 0) {
-        targetNormX = 0.62 + Math.cos(t * 0.8) * 0.16;
-        targetNormY = 0.36 + Math.sin(t * 1.35) * 0.13;
+      // Calculate natural approach wrist angle:
+      // When reaching down to table, wrist points down (~85° - 90°) to grasp parts cleanly.
+      // When reaching high in the air, wrist aligns naturally with the arm.
+      let wristAngle: number;
+      if (desiredWristAngle !== undefined) {
+        wristAngle = desiredWristAngle;
+      } else {
+        const heightFromTable = baseY - clampedY;
+        const downBlend = Math.max(0, Math.min(1, 1 - heightFromTable / (160 * scale)));
+        wristAngle = 0.25 + downBlend * 1.32; // 0.25 rad (~14°) up to 1.57 rad (90° down)
       }
 
-      const stiffness = s.mode === 'pick-place' ? 0.08 : 0.088;
-      const damping = 0.82;
-      s.velX = (s.velX + (targetNormX - s.smoothX) * stiffness) * damping;
-      s.velY = (s.velY + (targetNormY - s.smoothY) * stiffness) * damping;
-      s.smoothX += s.velX;
-      s.smoothY += s.velY;
+      // Wrist joint center
+      const wristX = clampedX - Math.cos(wristAngle) * L3;
+      const wristY = clampedY - Math.sin(wristAngle) * L3;
 
-      const rawTargetX = Math.max(width * 0.2, Math.min(width * 0.9, s.smoothX * width));
-      const rawTargetY = Math.max(height * 0.14, Math.min(baseY - 4 * scale, s.smoothY * height));
-
-      const wristAngle = Math.atan2(rawTargetY - baseY, rawTargetX - baseX) * 0.42 - 0.15;
-      const wristX = rawTargetX - Math.cos(wristAngle) * L3;
-      const wristY = rawTargetY - Math.sin(wristAngle) * L3;
-
+      // 2-Link vector from base to wrist
       const dx = wristX - baseX;
       const dy = wristY - baseY;
-      const maxReach = L1 + L2 - 4;
-      const dist = Math.min(Math.hypot(dx, dy), maxReach);
+      const dist = Math.max(minReach, Math.min(maxReach, Math.hypot(dx, dy)));
 
-      const baseToWristAngle = Math.atan2(dy, dx);
-      const cosElbow = Math.max(
-        -1,
-        Math.min(1, (L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * Math.max(dist, 1)))
+      // Angle from base to wrist (always in upper quadrant, dy is negative)
+      const gamma = Math.atan2(dy, dx);
+
+      // Law of cosines for elbow angle:
+      // Interior angle alpha
+      const cosAlpha = Math.max(
+        -0.98,
+        Math.min(0.98, (L1 * L1 + L2 * L2 - dist * dist) / (2 * L1 * L2))
       );
-      const theta1 = baseToWristAngle - Math.acos(cosElbow);
+      const alpha = Math.acos(cosAlpha);
 
+      // Relative elbow bend angle (strictly positive for Elbow-Up, guaranteed between 18° and 155°)
+      const thetaElbowRel = Math.PI - alpha;
+
+      // Law of cosines for shoulder angle offset beta
+      const cosBeta = Math.max(
+        -0.98,
+        Math.min(0.98, (L1 * L1 + dist * dist - L2 * L2) / (2 * L1 * dist))
+      );
+      const beta = Math.acos(cosBeta);
+
+      // Shoulder angle (elbow-up: subtract beta)
+      const theta1 = gamma - beta;
+
+      // Forward kinematics for joints
       const elbowX = baseX + Math.cos(theta1) * L1;
       const elbowY = baseY + Math.sin(theta1) * L1;
 
-      const theta2 = Math.atan2(wristY - elbowY, wristX - elbowX);
-      const wristJointX = elbowX + Math.cos(theta2) * L2;
-      const wristJointY = elbowY + Math.sin(theta2) * L2;
+      // Forearm absolute angle
+      const theta2 = theta1 + thetaElbowRel;
+      const calculatedWristX = elbowX + Math.cos(theta2) * L2;
+      const calculatedWristY = elbowY + Math.sin(theta2) * L2;
 
-      const eeX = wristJointX + Math.cos(wristAngle) * L3;
-      const eeY = wristJointY + Math.sin(wristAngle) * L3;
+      // End-effector TCP (Tool Center Point)
+      const tcpX = calculatedWristX + Math.cos(wristAngle) * L3;
+      const tcpY = calculatedWristY + Math.sin(wristAngle) * L3;
 
-      const gripX = eeX + Math.cos(wristAngle) * gripDist;
-      const gripY = eeY + Math.sin(wristAngle) * gripDist;
-      s.lastWristAngle = wristAngle;
-      s.lastGripX = gripX;
-      s.lastGripY = gripY;
+      return {
+        theta1,
+        theta2,
+        wristAngle,
+        elbowX,
+        elbowY,
+        wristX: calculatedWristX,
+        wristY: calculatedWristY,
+        tcpX,
+        tcpY,
+        dist,
+      };
+    };
 
-      const findGrippable = () => {
-        let best = -1;
-        let bestD = Infinity;
-        s.objects.forEach((o, i) => {
-          const pad = 12 * scale;
-          if (Math.abs(gripX - o.x) < o.w / 2 + pad && Math.abs(gripY - o.y) < o.h / 2 + pad) {
-            const d = Math.hypot(gripX - o.x, gripY - o.y);
-            if (d < bestD) {
-              bestD = d;
-              best = i;
+    const startTime = performance.now();
+    let lastTime = startTime;
+    let telemetryThrottle = 0;
+
+    const render = (now: number) => {
+      if (!running) return;
+      const dt = Math.min((now - lastTime) * 0.001, 0.05);
+      lastTime = now;
+      const t = (now - startTime) * 0.001;
+
+      const s = stateRef.current;
+      const g = getGeo();
+      const { scale, baseX, baseY, gripDist } = g;
+
+      // Workcell Physical Layouts
+      // 1. PCB Target Tray Socket (Center-Left)
+      const pcbWidth = 148 * scale;
+      const pcbHeight = 44 * scale;
+      const pcbBaseX = baseX + (width * 0.52 - baseX);
+      const pcbBaseY = baseY - pcbHeight / 2 - 2 * scale;
+      const pcbSlotXPositions = [
+        pcbBaseX - 44 * scale,
+        pcbBaseX,
+        pcbBaseX + 44 * scale,
+      ];
+
+      // 2. Incoming Feeder Track Conveyor (Right Side)
+      const feederWidth = 140 * scale;
+      const feederHeight = 36 * scale;
+      const feederBaseX = width * 0.84;
+      const feederBaseY = baseY - feederHeight / 2 - 2 * scale;
+      const feederPickX = feederBaseX - 32 * scale;
+      const feederPickY = baseY - 16 * scale;
+
+      // Emergency Stop check: halts all kinematics
+      if (s.eStopped) {
+        s.velX = 0;
+        s.velY = 0;
+      } else {
+        // Mode-specific Target Positioning
+        let targetX = s.smoothX * width;
+        let targetY = s.smoothY * height;
+        let gripCommand = s.clamped;
+
+        // ------------------ PICK & PLACE SMT WORKCELL ROUTINE ------------------
+        if (s.mode === 'pick-place') {
+          const a = s.auto;
+          const elapsed = t - a.phaseStart;
+          const go = (phase: AutoPhase) => {
+            a.phase = phase;
+            a.phaseStart = t;
+          };
+          const liftHeight = 65 * scale;
+          const atGoal = (gx: number, gy: number) =>
+            Math.hypot(s.prevTcpX - gx, s.prevTcpY - gy) < 8 * scale;
+
+          if (a.phase === 'select') {
+            gripCommand = false;
+            // Determine which slot is empty
+            const nextEmptySlot = s.pcbSlots.findIndex((slot) => slot === null);
+            if (nextEmptySlot >= 0 && s.feederParts.length > 0) {
+              a.activeSlotIdx = nextEmptySlot;
+              a.pickX = feederPickX;
+              a.pickY = feederPickY;
+              a.destX = pcbSlotXPositions[nextEmptySlot];
+              a.destY = pcbBaseY - 6 * scale;
+              go('approach');
+            } else if (nextEmptySlot < 0) {
+              // All 3 blocks placed! Begin Automated Optical Inspection (AOI)
+              go('aoi_scan');
+            }
+          } else if (a.phase === 'approach') {
+            targetX = a.pickX;
+            targetY = a.pickY - liftHeight;
+            if (atGoal(targetX, targetY) || elapsed > 1.2) go('descend');
+          } else if (a.phase === 'descend') {
+            targetX = a.pickX;
+            targetY = a.pickY;
+            if (atGoal(targetX, targetY) || elapsed > 1.0) {
+              audioEngine.playRelayClick();
+              gripCommand = true;
+              // Grip the part from feeder
+              if (!s.heldPart && s.feederParts.length > 0) {
+                s.heldPart = s.feederParts.shift() || null;
+              }
+              go('grip');
+            }
+          } else if (a.phase === 'grip') {
+            targetX = a.pickX;
+            targetY = a.pickY;
+            gripCommand = true;
+            if (elapsed > 0.35) go('lift');
+          } else if (a.phase === 'lift') {
+            targetX = a.pickX;
+            targetY = a.pickY - liftHeight;
+            gripCommand = true;
+            if (atGoal(targetX, targetY) || elapsed > 1.0) go('transit');
+          } else if (a.phase === 'transit') {
+            targetX = a.destX;
+            targetY = a.destY - liftHeight;
+            gripCommand = true;
+            if (atGoal(targetX, targetY) || elapsed > 1.4) go('lower');
+          } else if (a.phase === 'lower') {
+            targetX = a.destX;
+            targetY = a.destY;
+            gripCommand = true;
+            if (atGoal(targetX, targetY) || elapsed > 1.0) {
+              audioEngine.playMechanicalClick();
+              // Place part into PCB socket slot
+              if (s.heldPart) {
+                s.pcbSlots[a.activeSlotIdx] = s.heldPart;
+                s.heldPart = null;
+              }
+              gripCommand = false;
+              go('release');
+            }
+          } else if (a.phase === 'release') {
+            targetX = a.destX;
+            targetY = a.destY;
+            gripCommand = false;
+            if (elapsed > 0.35) go('retreat');
+          } else if (a.phase === 'retreat') {
+            targetX = a.destX;
+            targetY = a.destY - liftHeight;
+            gripCommand = false;
+            if (atGoal(targetX, targetY) || elapsed > 1.0) {
+              // Check if all 3 are completed
+              const emptyLeft = s.pcbSlots.findIndex((slot) => slot === null);
+              if (emptyLeft < 0) {
+                go('aoi_scan');
+              } else {
+                go('select');
+              }
+            }
+          } else if (a.phase === 'aoi_scan') {
+            // Move arm back to standby home
+            targetX = baseX + g.maxReach * 0.45;
+            targetY = baseY - 130 * scale;
+            gripCommand = false;
+            s.aoiLaserActive = true;
+            s.aoiScanProgress = Math.min(1, elapsed / 1.5);
+
+            if (elapsed > 1.6) {
+              s.aoiLaserActive = false;
+              s.dispatchPhase = 'sliding_out';
+              audioEngine.playRelayClick();
+              go('dispatch');
+            }
+          } else if (a.phase === 'dispatch') {
+            targetX = baseX + g.maxReach * 0.45;
+            targetY = baseY - 130 * scale;
+            gripCommand = false;
+
+            // Animate completed PCB sliding off to left, new PCB sliding in
+            if (s.dispatchPhase === 'sliding_out') {
+              s.pcbSlideOffset -= dt * 280 * scale;
+              if (s.pcbSlideOffset < -pcbWidth * 1.5) {
+                // Completed PCB has exited. Reset slots and slide fresh blank PCB from right
+                s.pcbSlots = [null, null, null];
+                s.pcbSlideOffset = pcbWidth * 1.5;
+                s.dispatchPhase = 'sliding_in';
+                // Reload 3 fresh feeder parts with conveyor indexing
+                s.feederParts = [
+                  { id: Date.now() + 1, label: 'SMD-0805', w: 34, h: 22 },
+                  { id: Date.now() + 2, label: 'QFN-32', w: 38, h: 26 },
+                  { id: Date.now() + 3, label: 'LM2596', w: 42, h: 28 },
+                ];
+              }
+            } else if (s.dispatchPhase === 'sliding_in') {
+              s.pcbSlideOffset += (0 - s.pcbSlideOffset) * 0.12;
+              s.feederBeltOffset += dt * 45 * scale;
+              if (Math.abs(s.pcbSlideOffset) < 1) {
+                s.pcbSlideOffset = 0;
+                s.dispatchPhase = 'idle';
+                audioEngine.playMechanicalClick();
+                go('select');
+              }
             }
           }
-        });
-        return best;
-      };
 
-      if (gripCommand && !s.prevGrip) s.gripArmedUntil = t + 0.8;
-      if (gripCommand && s.heldIndex < 0 && t < s.gripArmedUntil) {
-        const idx = findGrippable();
-        if (idx >= 0) {
-          s.heldIndex = idx;
-          s.heldOffX = s.objects[idx].x - gripX;
-          s.heldOffY = s.objects[idx].y - gripY;
-        }
-      } else if (!gripCommand && s.prevGrip && s.heldIndex >= 0) {
-        s.objects[s.heldIndex].vy = 0;
-        s.heldIndex = -1;
-      }
-      s.prevGrip = gripCommand;
-      const hoverIndex = s.heldIndex < 0 ? findGrippable() : -1;
-
-      s.objects.forEach((o, i) => {
-        if (i === s.heldIndex) {
-          s.heldOffX *= 0.85;
-          s.heldOffY *= 0.85;
-          o.x = gripX + s.heldOffX;
-          o.y = Math.min(gripY + s.heldOffY, baseY - o.h / 2);
+          if (gripCommand !== isClamped) setIsClamped(gripCommand);
+        } else if (s.mode === 'orbit') {
+          // LIVE KINEMATICS TELEMETRY MODE
+          if (s.trajTest) {
+            // Precision Figure-8 / Circular Machining Trajectory Test
+            const centerTx = baseX + g.maxReach * 0.62;
+            const centerTy = baseY - 120 * scale;
+            const rX = 70 * scale;
+            const rY = 55 * scale;
+            targetX = centerTx + Math.cos(t * 2.2) * rX;
+            targetY = centerTy + Math.sin(t * 4.4) * 0.5 * rY;
+          } else if (s.isHovering) {
+            targetX = s.normX * width;
+            targetY = s.normY * height;
+          } else {
+            // Elegant slow idle scan
+            targetX = baseX + g.maxReach * 0.6 + Math.cos(t * 1.1) * 60 * scale;
+            targetY = baseY - 110 * scale + Math.sin(t * 1.7) * 40 * scale;
+          }
         } else {
-          o.y = baseY - o.h / 2;
+          // CAD WIREFRAME MODE
+          if (s.isHovering) {
+            targetX = s.normX * width;
+            targetY = s.normY * height;
+          } else if (!reduceMotion) {
+            targetX = baseX + g.maxReach * 0.64 + Math.cos(t * 0.85) * 50 * scale;
+            targetY = baseY - 115 * scale + Math.sin(t * 1.3) * 35 * scale;
+          }
         }
-      });
 
-      const holding = s.heldIndex >= 0;
+        // Smooth critically-damped spring kinematics
+        const stiffness = s.mode === 'pick-place' ? 0.12 : 0.095;
+        const damping = 0.82;
+        const targetNormX = targetX / width;
+        const targetNormY = targetY / height;
+        s.velX = (s.velX + (targetNormX - s.smoothX) * stiffness) * damping;
+        s.velY = (s.velY + (targetNormY - s.smoothY) * stiffness) * damping;
+        s.smoothX += s.velX;
+        s.smoothY += s.velY;
+      }
 
-      s.trail.push({ x: eeX, y: eeY });
-      if (s.trail.length > 36) s.trail.shift();
+      // Solve inverse kinematics for current smooth position
+      const currentTargetX = s.smoothX * width;
+      const currentTargetY = s.smoothY * height;
+      const ik = solveIK(currentTargetX, currentTargetY);
 
-      // ---------------- Clear & Draw on Technical Drafting Plate ----------------
+      // Instantaneous speed calculation
+      const distTraveled = Math.hypot(ik.tcpX - s.prevTcpX, ik.tcpY - s.prevTcpY);
+      s.instantSpeed = dt > 0 ? (distTraveled / dt) * (scale > 0 ? 1 / scale : 1) : 0;
+      s.prevTcpX = ik.tcpX;
+      s.prevTcpY = ik.tcpY;
+
+      // Update motion trail
+      s.trail.push({ x: ik.tcpX, y: ik.tcpY, vel: s.instantSpeed });
+      if (s.trail.length > 40) s.trail.shift();
+
+      // Gripper Jaw Physics
+      const jawTarget = s.clamped ? 0.95 : 0.15;
+      s.smoothJaw += (jawTarget - s.smoothJaw) * 0.22;
+      const jawGap = (1 - s.smoothJaw) * 10 * scale;
+
+      // Throttle React state telemetry updates to 15fps
+      telemetryThrottle += dt;
+      if (telemetryThrottle > 0.065) {
+        telemetryThrottle = 0;
+        setTelemetry({
+          theta1: Math.round((ik.theta1 * 180) / Math.PI),
+          theta2: Math.round((ik.theta2 * 180) / Math.PI),
+          theta3: Math.round((ik.wristAngle * 180) / Math.PI),
+          tcpX: Math.round(ik.tcpX - baseX),
+          tcpY: Math.round(baseY - ik.tcpY),
+          vel: Math.round(s.instantSpeed),
+          mode: s.mode,
+        });
+      }
+
+      // =========================================================================
+      // RENDERING PIPELINE (3 COMPLETELY DISTINCT VISUAL & FUNCTIONAL MODES)
+      // =========================================================================
       ctx.clearRect(0, 0, width, height);
 
-      // Light drafting plate grid background
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.05)';
-      ctx.lineWidth = 1;
-      const step = 20 * scale;
-      for (let x = 0; x < width; x += step) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, height);
-        ctx.stroke();
-      }
-      for (let y = 0; y < height; y += step) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(width, y);
-        ctx.stroke();
+      // ----------------- 1. BASE TECHNICAL DRAFTING GRID -----------------
+      if (s.mode === 'cursor') {
+        // Blueprint CAD Grid: Crisp technical cyan grid with major/minor divisions
+        ctx.strokeStyle = 'rgba(0, 180, 216, 0.08)';
+        ctx.lineWidth = 1;
+        const gridStep = 18 * scale;
+        for (let x = 0; x < width; x += gridStep) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, height);
+          ctx.stroke();
+        }
+        for (let y = 0; y < height; y += gridStep) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+          ctx.stroke();
+        }
+
+        // Major isometric guide lines
+        ctx.strokeStyle = 'rgba(0, 180, 216, 0.14)';
+        ctx.lineWidth = 1.2;
+        for (let x = 0; x < width; x += gridStep * 4) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, height);
+          ctx.stroke();
+        }
+      } else {
+        // Light industrial workshop grid
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.04)';
+        ctx.lineWidth = 1;
+        const gridStep = 22 * scale;
+        for (let x = 0; x < width; x += gridStep) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, height);
+          ctx.stroke();
+        }
+        for (let y = 0; y < height; y += gridStep) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+          ctx.stroke();
+        }
       }
 
-      // Reach envelope arcs
-      [0.24, 0.42, 0.6].forEach((rFactor, idx) => {
-        ctx.strokeStyle = `rgba(0, 0, 0, ${0.12 - idx * 0.03})`;
+      // ----------------- 2. WORKCELL STATIONS & CONVEYORS -----------------
+      if (s.mode === 'pick-place') {
+        // DRAW PCB TARGET BAY (Center-Left)
+        ctx.save();
+        ctx.translate(s.pcbSlideOffset, 0);
+
+        // PCB Circuit Board Substrate (FR4 Dark Emerald)
+        const pcbX0 = pcbBaseX - pcbWidth / 2;
+        const pcbY0 = pcbBaseY - pcbHeight / 2;
+
+        ctx.fillStyle = '#0F2F20'; // Authentic FR4 Soldermask Green
+        ctx.strokeStyle = '#10B981';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(pcbX0, pcbY0, pcbWidth, pcbHeight, 4 * scale);
+        ctx.fill();
+        ctx.stroke();
+
+        // PCB Gold Ground Plane Traces & Mounting Holes
+        ctx.strokeStyle = 'rgba(212, 175, 55, 0.35)'; // ENIG Gold Traces
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(baseX, baseY, width * rFactor, -Math.PI * 0.92, -Math.PI * 0.06);
+        ctx.moveTo(pcbX0 + 6 * scale, pcbY0 + 6 * scale);
+        ctx.lineTo(pcbX0 + pcbWidth - 6 * scale, pcbY0 + 6 * scale);
+        ctx.moveTo(pcbX0 + 6 * scale, pcbY0 + pcbHeight - 6 * scale);
+        ctx.lineTo(pcbX0 + pcbWidth - 6 * scale, pcbY0 + pcbHeight - 6 * scale);
         ctx.stroke();
-      });
 
-      // Target Tray Bay (PCB Target Socket)
-      const zone = zoneOf();
-      ctx.save();
-      ctx.fillStyle = '#E2E2DF';
-      ctx.strokeStyle = '#30D158';
-      ctx.lineWidth = 1.6;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.roundRect(zone.x0, baseY - 12 * scale, zone.w, 16 * scale, 3 * scale);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
+        // 4 Plated Mounting Screws
+        [
+          [pcbX0 + 6 * scale, pcbY0 + 6 * scale],
+          [pcbX0 + pcbWidth - 6 * scale, pcbY0 + 6 * scale],
+          [pcbX0 + 6 * scale, pcbY0 + pcbHeight - 6 * scale],
+          [pcbX0 + pcbWidth - 6 * scale, pcbY0 + pcbHeight - 6 * scale],
+        ].forEach(([cx, cy]) => {
+          ctx.fillStyle = '#E5E7EB';
+          ctx.beginPath();
+          ctx.arc(cx, cy, 2.2 * scale, 0, Math.PI * 2);
+          ctx.fill();
+        });
 
-      ctx.fillStyle = '#059669';
-      ctx.font = `700 ${Math.round(9 * Math.max(scale, 0.9))}px "Geist Mono", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText('Target PCB Tray', zone.cx, baseY + 18 * scale);
-      ctx.textAlign = 'left';
+        // 3 Solder Footprint Sockets
+        const slotLabels = ['U1 (0805)', 'U2 (QFN)', 'U3 (REG)'];
+        pcbSlotXPositions.forEach((sx, idx) => {
+          const placedPart = s.pcbSlots[idx];
+          const slotW = 38 * scale;
+          const slotH = 24 * scale;
+          const slX = sx - slotW / 2;
+          const slY = pcbBaseY - slotH / 2;
 
-      // Motion Trail
+          // Solder pads
+          ctx.fillStyle = placedPart ? '#10B981' : '#D4AF37'; // Gold pads or soldered green
+          ctx.fillRect(slX - 3 * scale, slY + 4 * scale, 2.5 * scale, slotH - 8 * scale);
+          ctx.fillRect(slX + slotW + 0.5 * scale, slY + 4 * scale, 2.5 * scale, slotH - 8 * scale);
+
+          // Silkscreen outline
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(slX, slY, slotW, slotH);
+
+          if (placedPart) {
+            // Render Populated Component
+            ctx.fillStyle = '#18181B';
+            ctx.fillRect(slX + 2 * scale, slY + 2 * scale, slotW - 4 * scale, slotH - 4 * scale);
+
+            ctx.fillStyle = '#34D399';
+            ctx.font = `700 ${Math.round(8 * scale)}px "Geist Mono", monospace`;
+            ctx.textAlign = 'center';
+            ctx.fillText(placedPart.label, sx, pcbBaseY + 3 * scale);
+          } else {
+            // Silkscreen text
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.font = `600 ${Math.round(7.5 * scale)}px "Geist Mono", monospace`;
+            ctx.textAlign = 'center';
+            ctx.fillText(slotLabels[idx], sx, pcbBaseY + 3 * scale);
+          }
+        });
+
+        // AOI Laser Scanner Sweep Animation
+        if (s.aoiLaserActive) {
+          const scanX = pcbX0 + s.aoiScanProgress * pcbWidth;
+          const laserGrad = ctx.createLinearGradient(scanX - 12 * scale, 0, scanX + 4 * scale, 0);
+          laserGrad.addColorStop(0, 'rgba(16, 185, 129, 0)');
+          laserGrad.addColorStop(0.7, 'rgba(16, 185, 129, 0.45)');
+          laserGrad.addColorStop(1, 'rgba(16, 185, 129, 0.95)');
+
+          ctx.fillStyle = laserGrad;
+          ctx.fillRect(scanX - 12 * scale, pcbY0 - 4 * scale, 14 * scale, pcbHeight + 8 * scale);
+
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(scanX, pcbY0 - 4 * scale);
+          ctx.lineTo(scanX, pcbY0 + pcbHeight + 4 * scale);
+          ctx.stroke();
+
+          // Live AOI Inspection Status Badge
+          ctx.fillStyle = '#10B981';
+          ctx.font = `700 ${Math.round(9 * scale)}px "Geist Mono", monospace`;
+          ctx.textAlign = 'center';
+          ctx.fillText('AOI 100% PASS · QC VERIFIED', pcbBaseX, pcbY0 - 10 * scale);
+        } else {
+          ctx.fillStyle = '#059669';
+          ctx.font = `700 ${Math.round(8.5 * scale)}px "Geist Mono", monospace`;
+          ctx.textAlign = 'center';
+          ctx.fillText('TARGET PCB SOCKET', pcbBaseX, pcbY0 - 8 * scale);
+        }
+
+        ctx.restore();
+
+        // DRAW COMPONENT FEEDER CONVEYOR (Right Side)
+        const fX0 = feederBaseX - feederWidth / 2;
+        const fY0 = feederBaseY - feederHeight / 2;
+
+        // Conveyor Rails
+        ctx.fillStyle = '#262626';
+        ctx.strokeStyle = '#404040';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(fX0, fY0, feederWidth, feederHeight, 4 * scale);
+        ctx.fill();
+        ctx.stroke();
+
+        // Conveyor motorized roller lines
+        ctx.strokeStyle = '#525252';
+        ctx.lineWidth = 1.2;
+        const rollStep = 14 * scale;
+        for (let rx = fX0 + (s.feederBeltOffset % rollStep); rx < fX0 + feederWidth; rx += rollStep) {
+          ctx.beginPath();
+          ctx.moveTo(rx, fY0 + 2 * scale);
+          ctx.lineTo(rx, fY0 + feederHeight - 2 * scale);
+          ctx.stroke();
+        }
+
+        // Optical Laser Presence Beam (Green sensor line)
+        ctx.strokeStyle = s.feederParts.length > 0 ? '#10B981' : '#EF4444';
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(feederPickX, fY0);
+        ctx.lineTo(feederPickX, fY0 + feederHeight);
+        ctx.stroke();
+
+        ctx.fillStyle = s.feederParts.length > 0 ? '#10B981' : '#EF4444';
+        ctx.font = `700 ${Math.round(8 * scale)}px "Geist Mono", monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText(
+          s.feederParts.length > 0 ? 'FEEDER: READY' : 'FEEDER: INDEXING',
+          feederBaseX,
+          fY0 - 8 * scale
+        );
+
+        // Draw queued parts on feeder conveyor
+        s.feederParts.forEach((part, idx) => {
+          const px = feederPickX + idx * 42 * scale;
+          const py = feederBaseY;
+          if (px > fX0 + feederWidth - 10 * scale) return;
+
+          ctx.fillStyle = '#18181B';
+          ctx.strokeStyle = '#E5E7EB';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.roundRect(px - part.w / 2, py - part.h / 2, part.w, part.h, 3 * scale);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = `700 ${Math.round(7.5 * scale)}px "Geist Mono", monospace`;
+          ctx.textAlign = 'center';
+          ctx.fillText(part.label, px, py + 3 * scale);
+        });
+
+        // Draw currently held part at the gripper
+        if (s.heldPart) {
+          const hp = s.heldPart;
+          ctx.save();
+          ctx.translate(ik.tcpX, ik.tcpY);
+          ctx.rotate(ik.wristAngle);
+          ctx.fillStyle = '#18181B';
+          ctx.strokeStyle = '#10B981';
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.roundRect(-hp.w / 2, -hp.h / 2, hp.w, hp.h, 3 * scale);
+          ctx.fill();
+          ctx.stroke();
+
+          ctx.fillStyle = '#34D399';
+          ctx.font = `700 ${Math.round(8 * scale)}px "Geist Mono", monospace`;
+          ctx.textAlign = 'center';
+          ctx.fillText(hp.label, 0, 3 * scale);
+          ctx.restore();
+        }
+      }
+
+      // ----------------- 3. MOTION TRAIL (Live Kinematics & Wireframe) -----------------
       if (s.trail.length > 2) {
         ctx.beginPath();
         s.trail.forEach((pt, idx) => {
           if (idx === 0) ctx.moveTo(pt.x, pt.y);
           else ctx.lineTo(pt.x, pt.y);
         });
-        const trailGrad = ctx.createLinearGradient(s.trail[0].x, s.trail[0].y, eeX, eeY);
-        trailGrad.addColorStop(0, 'rgba(255, 85, 0, 0)');
-        trailGrad.addColorStop(1, holding ? 'rgba(16, 185, 129, 0.9)' : 'rgba(255, 85, 0, 0.95)');
-        ctx.strokeStyle = trailGrad;
-        ctx.lineWidth = 2.4;
-        ctx.lineCap = 'round';
+
+        if (s.mode === 'cursor') {
+          ctx.strokeStyle = 'rgba(0, 240, 255, 0.4)';
+          ctx.lineWidth = 1.6;
+          ctx.setLineDash([3, 3]);
+        } else {
+          const trailGrad = ctx.createLinearGradient(s.trail[0].x, s.trail[0].y, ik.tcpX, ik.tcpY);
+          trailGrad.addColorStop(0, 'rgba(255, 92, 0, 0)');
+          trailGrad.addColorStop(1, s.clamped ? 'rgba(16, 185, 129, 0.85)' : 'rgba(255, 92, 0, 0.9)');
+          ctx.strokeStyle = trailGrad;
+          ctx.lineWidth = 2.2;
+          ctx.setLineDash([]);
+        }
         ctx.stroke();
+        ctx.setLineDash([]);
       }
 
-      // SMD Electronic Components
-      s.objects.forEach((o, i) => {
-        const isHeld = i === s.heldIndex;
-        const isHover = i === hoverIndex;
-        const x0 = o.x - o.w / 2;
-        const y0 = o.y - o.h / 2;
-
-        // Silver solder pads / leads
-        ctx.strokeStyle = '#888884';
-        ctx.lineWidth = 1.2;
-        const pins = 4;
-        for (let p = 0; p < pins; p++) {
-          const px = x0 + (o.w / (pins + 1)) * (p + 1);
-          ctx.beginPath();
-          ctx.moveTo(px, y0);
-          ctx.lineTo(px, y0 - 3 * scale);
-          ctx.moveTo(px, y0 + o.h);
-          ctx.lineTo(px, y0 + o.h + 2 * scale);
-          ctx.stroke();
-        }
-
-        // Chip body
-        ctx.save();
-        ctx.shadowColor = isHeld ? 'rgba(16, 185, 129, 0.4)' : 'rgba(0, 0, 0, 0.15)';
-        ctx.shadowBlur = isHeld ? 12 : 5;
-        ctx.fillStyle = '#18181B';
+      // ----------------- 4. ROBOT BASE PEDESTAL -----------------
+      // Realistic Heavy Industrial Flanged Base
+      ctx.save();
+      if (s.mode === 'cursor') {
+        // Wireframe Base
+        ctx.strokeStyle = '#00F0FF';
+        ctx.lineWidth = 1.6;
+        ctx.strokeRect(baseX - 32 * scale, baseY, 64 * scale, 14 * scale);
+        ctx.strokeRect(baseX - 22 * scale, baseY - 8 * scale, 44 * scale, 8 * scale);
+      } else {
+        // Heavy CNC Anodized Mounting Plate
+        ctx.fillStyle = '#1A1A1E';
+        ctx.strokeStyle = '#3F3F46';
+        ctx.lineWidth = 1.8;
         ctx.beginPath();
-        ctx.roundRect(x0, y0, o.w, o.h, 4 * scale);
+        ctx.roundRect(baseX - 34 * scale, baseY, 68 * scale, 16 * scale, 3 * scale);
         ctx.fill();
-        ctx.restore();
-
-        // Edge stroke
-        ctx.strokeStyle = isHeld ? '#10B981' : isHover ? '#FF5500' : '#3F3F46';
-        ctx.lineWidth = isHeld || isHover ? 1.8 : 1.2;
-        ctx.beginPath();
-        ctx.roundRect(x0, y0, o.w, o.h, 4 * scale);
         ctx.stroke();
 
-        // Pin 1 dot
-        ctx.fillStyle = '#FF5500';
+        // Upper Servo Turret Hub
+        ctx.fillStyle = '#27272A';
         ctx.beginPath();
-        ctx.arc(x0 + 5 * scale, y0 + 5 * scale, 1.4 * scale, 0, Math.PI * 2);
+        ctx.roundRect(baseX - 22 * scale, baseY - 8 * scale, 44 * scale, 9 * scale, 2 * scale);
         ctx.fill();
+        ctx.stroke();
 
-        // Chip Label
-        ctx.fillStyle = isHeld ? '#34D399' : '#FFFFFF';
-        ctx.font = `700 ${Math.round(8.5 * Math.max(scale, 0.85))}px "Geist Mono", monospace`;
-        ctx.textAlign = 'center';
-        ctx.fillText(o.label, o.x, o.y + 3.5 * scale);
-        ctx.textAlign = 'left';
-      });
+        // Anchor Bolts
+        [-24, -10, 10, 24].forEach((off) => {
+          ctx.fillStyle = '#71717A';
+          ctx.beginPath();
+          ctx.arc(baseX + off * scale, baseY + 8 * scale, 2.2 * scale, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      }
+      ctx.restore();
 
-      // Machined dark anodized arm links
-      const drawLink = (x1: number, y1: number, x2: number, y2: number, w1: number, w2: number) => {
+      // ----------------- 5. ROBOT ARMS & KINEMATIC LINKS -----------------
+      const drawLink = (
+        x1: number,
+        y1: number,
+        x2: number,
+        y2: number,
+        w1: number,
+        w2: number
+      ) => {
         const perp = Math.atan2(y2 - y1, x2 - x1) + Math.PI / 2;
         const c = Math.cos(perp);
         const sn = Math.sin(perp);
+
         const p1x = x1 + c * (w1 / 2);
         const p1y = y1 + sn * (w1 / 2);
         const p2x = x1 - c * (w1 / 2);
@@ -628,104 +960,305 @@ export const HeroSection: React.FC = () => {
         const p4y = y2 + sn * (w2 / 2);
 
         ctx.save();
-        ctx.fillStyle = '#222225';
-        ctx.beginPath();
-        ctx.moveTo(p1x, p1y);
-        ctx.lineTo(p2x, p2y);
-        ctx.lineTo(p3x, p3y);
-        ctx.lineTo(p4x, p4y);
-        ctx.closePath();
-        ctx.fill();
+        if (s.mode === 'cursor') {
+          // =================== MODE 1: CAD WIREFRAME BLUEPRINT ===================
+          // Translucent chassis fill
+          ctx.fillStyle = 'rgba(0, 240, 255, 0.05)';
+          ctx.strokeStyle = '#00F0FF';
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.moveTo(p1x, p1y);
+          ctx.lineTo(p2x, p2y);
+          ctx.lineTo(p3x, p3y);
+          ctx.lineTo(p4x, p4y);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
 
-        // Top specular hairline
-        ctx.strokeStyle = '#444448';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-        ctx.stroke();
-        ctx.restore();
-      };
+          // Internal CAD lightening truss ribs (aerospace hollowed link)
+          const midX = (x1 + x2) / 2;
+          const midY = (y1 + y2) / 2;
+          ctx.strokeStyle = 'rgba(0, 240, 255, 0.45)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(midX - 12 * scale, midY - 6 * scale, 24 * scale, 12 * scale);
 
-      drawLink(baseX, baseY, elbowX, elbowY, 26 * scale, 20 * scale);
-      drawLink(elbowX, elbowY, wristJointX, wristJointY, 20 * scale, 16 * scale);
-      drawLink(wristJointX, wristJointY, eeX, eeY, 15 * scale, 12 * scale);
+          // Neutral Bending Centerline (ISO Dash-Dot)
+          ctx.strokeStyle = '#FF5C00';
+          ctx.lineWidth = 1.2;
+          ctx.setLineDash([8, 3, 2, 3]);
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        } else {
+          // =================== MODE 2 & 3: CNC MACHINED ANODIZED SOLID ===================
+          // Deep graphite chassis
+          ctx.fillStyle = '#18181B';
+          ctx.beginPath();
+          ctx.moveTo(p1x, p1y);
+          ctx.lineTo(p2x, p2y);
+          ctx.lineTo(p3x, p3y);
+          ctx.lineTo(p4x, p4y);
+          ctx.closePath();
+          ctx.fill();
 
-      // Dieter Rams Joint Pivots
-      const drawPivot = (px: number, py: number, radius: number, angleText?: string) => {
-        ctx.save();
-        ctx.fillStyle = '#DFDFDC';
-        ctx.beginPath();
-        ctx.arc(px, py, radius, 0, Math.PI * 2);
-        ctx.fill();
+          // Chamfered Metallic Edge
+          ctx.strokeStyle = '#3F3F46';
+          ctx.lineWidth = 1.6;
+          ctx.stroke();
 
-        ctx.strokeStyle = '#111111';
-        ctx.lineWidth = 1.8;
-        ctx.stroke();
+          // Inset carbon/aluminum faceplate
+          ctx.fillStyle = '#27272A';
+          const inW1 = w1 * 0.65;
+          const inW2 = w2 * 0.65;
+          ctx.beginPath();
+          ctx.moveTo(x1 + c * (inW1 / 2), y1 + sn * (inW1 / 2));
+          ctx.lineTo(x1 - c * (inW1 / 2), y1 - sn * (inW1 / 2));
+          ctx.lineTo(x2 - c * (inW2 / 2), y2 - sn * (inW2 / 2));
+          ctx.lineTo(x2 + c * (inW2 / 2), y2 + sn * (inW2 / 2));
+          ctx.closePath();
+          ctx.fill();
 
-        ctx.fillStyle = '#FF5500';
-        ctx.beginPath();
-        ctx.arc(px, py, radius * 0.35, 0, Math.PI * 2);
-        ctx.fill();
-
-        if (angleText) {
-          ctx.fillStyle = '#111111';
-          ctx.font = `600 ${Math.round(10 * Math.max(scale, 0.85))}px "Geist Mono", monospace`;
-          ctx.fillText(angleText, px + radius + 4 * scale, py + 3 * scale);
+          // Hairline highlight
+          ctx.strokeStyle = '#52525B';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
         }
         ctx.restore();
       };
 
-      drawPivot(baseX, baseY, 13 * scale, `θ1 ${Math.round((theta1 * 180) / Math.PI)}°`);
-      drawPivot(elbowX, elbowY, 10 * scale, `θ2 ${Math.round(((theta2 - theta1) * 180) / Math.PI)}°`);
-      drawPivot(wristJointX, wristJointY, 7 * scale, `θ3 ${Math.round((wristAngle * 180) / Math.PI)}°`);
+      // Draw 3 Kinematic Links
+      drawLink(baseX, baseY, ik.elbowX, ik.elbowY, 28 * scale, 22 * scale);
+      drawLink(ik.elbowX, ik.elbowY, ik.wristX, ik.wristY, 22 * scale, 18 * scale);
+      drawLink(ik.wristX, ik.wristY, ik.tcpX, ik.tcpY, 16 * scale, 14 * scale);
 
-      // End-Effector Gripper Jaws
+      // ----------------- 6. KINEMATIC PIVOTS & COORDINATE FRAMES -----------------
+      const drawCoordinateFrame = (x: number, y: number, angle: number, label: string) => {
+        const axisLen = 22 * scale;
+        // X-Axis (Red)
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+
+        ctx.strokeStyle = '#EF4444';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(axisLen, 0);
+        ctx.stroke();
+
+        // Arrowhead
+        ctx.fillStyle = '#EF4444';
+        ctx.beginPath();
+        ctx.moveTo(axisLen, 0);
+        ctx.lineTo(axisLen - 5 * scale, -3 * scale);
+        ctx.lineTo(axisLen - 5 * scale, 3 * scale);
+        ctx.fill();
+
+        // Y-Axis (Green)
+        ctx.strokeStyle = '#10B981';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, -axisLen);
+        ctx.stroke();
+
+        ctx.fillStyle = '#10B981';
+        ctx.beginPath();
+        ctx.moveTo(0, -axisLen);
+        ctx.lineTo(-3 * scale, -axisLen + 5 * scale);
+        ctx.lineTo(3 * scale, -axisLen + 5 * scale);
+        ctx.fill();
+
+        ctx.fillStyle = '#00F0FF';
+        ctx.font = `700 ${Math.round(8.5 * scale)}px "Geist Mono", monospace`;
+        ctx.fillText(label, 6 * scale, -8 * scale);
+        ctx.restore();
+      };
+
+      const drawPivot = (
+        px: number,
+        py: number,
+        radius: number,
+        angleDeg: number,
+        jointLabel: string
+      ) => {
+        ctx.save();
+        if (s.mode === 'cursor') {
+          // CAD Wireframe Concentric Circles
+          ctx.strokeStyle = '#00F0FF';
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(px, py, radius, 0, Math.PI * 2);
+          ctx.stroke();
+
+          ctx.beginPath();
+          ctx.arc(px, py, radius * 0.45, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Angle dimension callout
+          ctx.fillStyle = '#FF5C00';
+          ctx.font = `700 ${Math.round(9.5 * scale)}px "Geist Mono", monospace`;
+          ctx.fillText(`${jointLabel}: ${angleDeg}°`, px + radius + 4 * scale, py + 3 * scale);
+        } else {
+          // Anodized Rotary Actuator Hub
+          ctx.fillStyle = '#18181B';
+          ctx.beginPath();
+          ctx.arc(px, py, radius, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.strokeStyle = '#71717A';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+
+          // Safety Orange Center LED
+          ctx.fillStyle = '#FF5C00';
+          ctx.beginPath();
+          ctx.arc(px, py, radius * 0.38, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#111111';
+          ctx.font = `700 ${Math.round(9 * scale)}px "Geist Mono", monospace`;
+          ctx.fillText(`${jointLabel} ${angleDeg}°`, px + radius + 5 * scale, py + 3 * scale);
+        }
+        ctx.restore();
+      };
+
+      // Draw Pivots
+      drawPivot(baseX, baseY, 13 * scale, Math.round((ik.theta1 * 180) / Math.PI), 'θ1');
+      drawPivot(ik.elbowX, ik.elbowY, 10 * scale, Math.round(((ik.theta2 - ik.theta1) * 180) / Math.PI), 'θ2');
+      drawPivot(ik.wristX, ik.wristY, 7 * scale, Math.round((ik.wristAngle * 180) / Math.PI), 'θ3');
+
+      // Draw Coordinate Frames in CAD Wireframe Mode
+      if (s.mode === 'cursor') {
+        drawCoordinateFrame(baseX, baseY, 0, '{0}');
+        drawCoordinateFrame(ik.elbowX, ik.elbowY, ik.theta1, '{1}');
+        drawCoordinateFrame(ik.wristX, ik.wristY, ik.theta2, '{2}');
+        drawCoordinateFrame(ik.tcpX, ik.tcpY, ik.wristAngle, '{TCP}');
+
+        // CAD Dimension Callouts
+        ctx.save();
+        ctx.strokeStyle = 'rgba(0, 240, 255, 0.5)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+
+        // Horizontal X-dimension line
+        ctx.beginPath();
+        ctx.moveTo(baseX, baseY + 18 * scale);
+        ctx.lineTo(ik.tcpX, baseY + 18 * scale);
+        ctx.stroke();
+
+        ctx.fillStyle = '#00F0FF';
+        ctx.font = `600 ${Math.round(8.5 * scale)}px "Geist Mono", monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`ΔX: ${(ik.tcpX - baseX).toFixed(1)}mm`, (baseX + ik.tcpX) / 2, baseY + 30 * scale);
+
+        // Vertical Y-dimension line
+        ctx.beginPath();
+        ctx.moveTo(baseX - 24 * scale, baseY);
+        ctx.lineTo(baseX - 24 * scale, ik.tcpY);
+        ctx.stroke();
+
+        ctx.textAlign = 'right';
+        ctx.fillText(`ΔY: ${(baseY - ik.tcpY).toFixed(1)}mm`, baseX - 28 * scale, (baseY + ik.tcpY) / 2);
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
+      // ----------------- 7. END-EFFECTOR PARALLEL GRIPPER JAWS -----------------
       ctx.save();
-      const jawTarget = gripCommand ? 0.95 : 0.15;
-      s.smoothJaw += (jawTarget - s.smoothJaw) * 0.22;
-      const jawOffset = (1 - s.smoothJaw) * 9 * scale;
+      ctx.translate(ik.tcpX, ik.tcpY);
+      ctx.rotate(ik.wristAngle);
 
-      ctx.translate(eeX, eeY);
-      ctx.rotate(wristAngle);
+      if (s.mode === 'cursor') {
+        ctx.strokeStyle = '#00F0FF';
+        ctx.lineWidth = 1.5;
+        // Upper Jaw Wireframe
+        ctx.strokeRect(0, -9 * scale - jawGap, 16 * scale, 3.5 * scale);
+        // Lower Jaw Wireframe
+        ctx.strokeRect(0, 5.5 * scale + jawGap, 16 * scale, 3.5 * scale);
+      } else {
+        ctx.fillStyle = '#18181B';
+        ctx.strokeStyle = s.clamped ? '#10B981' : '#111111';
+        ctx.lineWidth = 1.4;
 
-      ctx.fillStyle = '#1A1A18';
-      ctx.strokeStyle = holding ? '#10B981' : '#111111';
-      ctx.lineWidth = 1.4;
+        // Upper Jaw
+        ctx.beginPath();
+        ctx.rect(0, -10 * scale - jawGap, 18 * scale, 4 * scale);
+        ctx.fill();
+        ctx.stroke();
 
-      // Left jaw
-      ctx.beginPath();
-      ctx.rect(4 * scale, -11 * scale - jawOffset, 16 * scale, 4 * scale);
-      ctx.fill();
-      ctx.stroke();
+        // Lower Jaw
+        ctx.beginPath();
+        ctx.rect(0, 6 * scale + jawGap, 18 * scale, 4 * scale);
+        ctx.fill();
+        ctx.stroke();
 
-      // Right jaw
-      ctx.beginPath();
-      ctx.rect(4 * scale, 7 * scale + jawOffset, 16 * scale, 4 * scale);
-      ctx.fill();
-      ctx.stroke();
-
-      // Gripper Laser Crosshair
-      ctx.strokeStyle = holding ? '#10B981' : '#FF5500';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.moveTo(gripDist - 6 * scale, 0);
-      ctx.lineTo(gripDist + 6 * scale, 0);
-      ctx.stroke();
-
+        // Laser Crosshair
+        ctx.strokeStyle = s.clamped ? '#10B981' : '#FF5C00';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(gripDist - 8 * scale, 0);
+        ctx.lineTo(gripDist + 8 * scale, 0);
+        ctx.stroke();
+      }
       ctx.restore();
+
+      // ----------------- 8. VELOCITY VECTOR HUD IN LIVE KINEMATICS -----------------
+      if (s.mode === 'orbit' && s.instantSpeed > 8) {
+        ctx.save();
+        const velScale = Math.min(60 * scale, s.instantSpeed * 0.18 * scale);
+        const velAngle = Math.atan2(ik.tcpY - s.prevTcpY, ik.tcpX - s.prevTcpX);
+
+        ctx.strokeStyle = '#10B981';
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.moveTo(ik.tcpX, ik.tcpY);
+        ctx.lineTo(ik.tcpX + Math.cos(velAngle) * velScale, ik.tcpY + Math.sin(velAngle) * velScale);
+        ctx.stroke();
+
+        ctx.fillStyle = '#10B981';
+        ctx.font = `700 ${Math.round(8.5 * scale)}px "Geist Mono", monospace`;
+        ctx.fillText(
+          `v: ${Math.round(s.instantSpeed)} mm/s`,
+          ik.tcpX + Math.cos(velAngle) * velScale + 4,
+          ik.tcpY + Math.sin(velAngle) * velScale
+        );
+        ctx.restore();
+      }
+
+      // ----------------- 9. EMERGENCY STOP OVERLAY (If Engaged) -----------------
+      if (s.eStopped) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.12)';
+        ctx.fillRect(0, 0, width, height);
+
+        ctx.fillStyle = '#DC2626';
+        ctx.font = `700 ${Math.round(14 * scale)}px "Geist Mono", monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText('⚠ EMERGENCY STOP ACTIVATED · MOTORS HALTED ⚠', width / 2, height * 0.48);
+
+        ctx.font = `600 ${Math.round(10 * scale)}px "Geist Mono", monospace`;
+        ctx.fillStyle = '#111111';
+        ctx.fillText('CLICK E-STOP SWITCH TO RELEASE BRAKES', width / 2, height * 0.48 + 24 * scale);
+        ctx.restore();
+      }
 
       animationFrameId = requestAnimationFrame(render);
     };
 
     const handleVisibility = () => {
-      isOnScreen = !document.hidden;
-      if (isOnScreen && !running) {
-        running = true;
-        animationFrameId = requestAnimationFrame(render);
-      } else if (!isOnScreen) {
+      if (document.hidden) {
         running = false;
         cancelAnimationFrame(animationFrameId);
+      } else {
+        running = true;
+        lastTime = performance.now();
+        animationFrameId = requestAnimationFrame(render);
       }
     };
 
@@ -750,14 +1283,15 @@ export const HeroSection: React.FC = () => {
     const x = (clientX - rect.left) / rect.width;
     const y = (clientY - rect.top) / rect.height;
     const s = stateRef.current;
-    s.normX = Math.max(0.1, Math.min(0.92, x));
-    s.normY = Math.max(0.12, Math.min(0.9, y));
+    s.normX = Math.max(0.12, Math.min(0.92, x));
+    s.normY = Math.max(0.12, Math.min(0.88, y));
     s.isHovering = true;
   };
 
   const handleModeChange = (mode: ArmControlMode) => {
     audioEngine.playRelayClick();
     setArmMode(mode);
+    setIsTrajectoryTest(false);
     if (mode !== 'pick-place') {
       setIsClamped(false);
     }
@@ -765,41 +1299,18 @@ export const HeroSection: React.FC = () => {
 
   const toggleGrip = () => {
     audioEngine.playRelayClick();
-    if (armMode === 'pick-place') {
-      setArmMode('cursor');
-      setIsClamped(false);
-      return;
-    }
+    if (armMode === 'pick-place') return;
     setIsClamped((prev) => !prev);
   };
 
-  useEffect(() => {
-    const handleRemoteGrip = () => {
-      toggleGrip();
-    };
-    window.addEventListener('portfolio-toggle-gripper', handleRemoteGrip);
-    return () => window.removeEventListener('portfolio-toggle-gripper', handleRemoteGrip);
-  }, [armMode]);
+  const toggleEStop = () => {
+    audioEngine.playMechanicalClick();
+    setIsEStopped((prev) => !prev);
+  };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    const s = stateRef.current;
-    const step = 0.03;
-    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
-      e.preventDefault();
-      if (armMode !== 'cursor') setArmMode('cursor');
-      if (!s.isHovering) {
-        s.normX = s.smoothX;
-        s.normY = s.smoothY;
-      }
-      if (e.key === 'ArrowLeft') s.normX = Math.max(0.1, s.normX - step);
-      if (e.key === 'ArrowRight') s.normX = Math.min(0.92, s.normX + step);
-      if (e.key === 'ArrowUp') s.normY = Math.max(0.12, s.normY - step);
-      if (e.key === 'ArrowDown') s.normY = Math.min(0.9, s.normY + step);
-      s.isHovering = true;
-    } else if (e.key === ' ' || e.key === 'Enter') {
-      e.preventDefault();
-      toggleGrip();
-    }
+  const toggleTrajectoryTest = () => {
+    audioEngine.playRelayClick();
+    setIsTrajectoryTest((prev) => !prev);
   };
 
   return (
@@ -900,7 +1411,7 @@ export const HeroSection: React.FC = () => {
             ref={stageRef}
             role="application"
             tabIndex={0}
-            aria-label="Interactive robotic arm. Move pointer or use arrow keys to guide gripper; click or press Space to grip and release components."
+            aria-label="Interactive robotic arm. Move pointer to control manipulator; toggle modes or click to operate gripper."
             onMouseMove={(e) => setPointer(e.clientX, e.clientY)}
             onMouseLeave={() => (stateRef.current.isHovering = false)}
             onTouchStart={(e) =>
@@ -910,32 +1421,31 @@ export const HeroSection: React.FC = () => {
               e.touches[0] && setPointer(e.touches[0].clientX, e.touches[0].clientY)
             }
             onClick={toggleGrip}
-            onKeyDown={handleKeyDown}
             onBlur={() => (stateRef.current.isHovering = false)}
             data-dmm-target="manipulator"
-            className="relative h-[330px] sm:h-[430px] w-full rounded-xl bg-[#E8E8E5] border border-[#D0D0CB] shadow-[inset_0_2px_4px_rgba(0,0,0,0.06),0_1px_0_rgba(255,255,255,0.9),0_12px_32px_-12px_rgba(0,0,0,0.08)] overflow-hidden cursor-crosshair select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5500]"
+            className="relative h-[360px] sm:h-[440px] w-full rounded-xl bg-[#E8E8E5] border border-[#D0D0CB] shadow-[inset_0_2px_4px_rgba(0,0,0,0.06),0_1px_0_rgba(255,255,255,0.9),0_12px_32px_-12px_rgba(0,0,0,0.08)] overflow-hidden cursor-crosshair select-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FF5500]"
           >
             <CornerCrosshairs type="crosshair" />
 
-            {/* Top Control Strip: Clean Authentic Industrial Hardware Buttons */}
-            <div className="relative z-10 px-4 sm:px-6 pt-4 sm:pt-4 flex flex-wrap items-center justify-between gap-3 bg-[#DFDFDC]/70 border-b border-[#D0D0CA] pb-3">
+            {/* Top Control Strip: Authentic Industrial Hardware Buttons */}
+            <div className="relative z-10 px-4 sm:px-6 pt-3.5 sm:pt-4 flex flex-wrap items-center justify-between gap-3 bg-[#DFDFDC]/80 border-b border-[#D0D0CA] pb-3 backdrop-blur-sm">
               <div className="flex items-center gap-2.5 pointer-events-none min-w-0">
-                <span className="h-2 w-2 rounded-full bg-[#FF5500] shadow-[0_0_6px_#FF5500] shrink-0" />
+                <span className="h-2 w-2 rounded-full bg-[#FF5500] shadow-[0_0_6px_#FF5500] shrink-0 animate-pulse" />
                 <span className="font-sans text-xs font-bold text-[#111111] uppercase tracking-wider truncate">
                   Articulated Manipulator &amp; Gripper Stage
                 </span>
                 <span className="font-mono text-[9px] font-bold text-white uppercase px-2 py-0.5 rounded bg-[#111111] shadow-sm">
-                  Rev 3.2
+                  REV 4.0
                 </span>
               </div>
 
-              {/* Physical Rocker Switch Buttons + Tactile Dial */}
+              {/* Physical Rocker Switch Buttons + Tactile Controls */}
               <div
                 className="flex flex-wrap items-center gap-2"
                 onClick={(e) => e.stopPropagation()}
               >
                 <div className="hidden sm:flex items-center gap-2 pr-1">
-                  <TactileDial color="orange" size={20} rotation={25} label="CALIB" />
+                  <TactileDial color="orange" size={20} rotation={35} label="CALIB" />
                 </div>
 
                 {MODES.map((m) => {
@@ -957,6 +1467,21 @@ export const HeroSection: React.FC = () => {
                   );
                 })}
 
+                {/* Live Kinematics Special: Automated Trajectory Test Button */}
+                {armMode === 'orbit' && (
+                  <button
+                    type="button"
+                    onClick={toggleTrajectoryTest}
+                    className={`font-mono text-xs font-bold uppercase px-2.5 py-1.5 rounded transition-all shadow-sm ${
+                      isTrajectoryTest
+                        ? 'bg-[#10B981] text-white shadow-[0_2px_0_#059669]'
+                        : 'bg-[#DFDFDC] text-[#333330] border border-[#C8C8C2] hover:bg-[#EAEAE7]'
+                    }`}
+                  >
+                    {isTrajectoryTest ? 'Trajectory: Active' : 'Test Contour'}
+                  </button>
+                )}
+
                 {/* Gripper Status Pill */}
                 <button
                   type="button"
@@ -975,6 +1500,39 @@ export const HeroSection: React.FC = () => {
                   />
                   <span>{isClamped ? 'Gripper Clamped' : 'Gripper Open'}</span>
                 </button>
+
+                {/* Industrial Emergency Stop (E-STOP) Button */}
+                <button
+                  type="button"
+                  aria-pressed={isEStopped}
+                  onClick={toggleEStop}
+                  title="Industrial Safety Emergency Stop"
+                  className={`px-2.5 py-1.5 rounded font-mono text-xs font-bold uppercase transition-all shadow-sm flex items-center gap-1 cursor-pointer ${
+                    isEStopped
+                      ? 'bg-[#DC2626] text-white animate-pulse shadow-[0_2px_0_#991B1B]'
+                      : 'bg-[#DFDFDC] text-[#DC2626] border border-[#DC2626]/40 hover:bg-[#FEE2E2]'
+                  }`}
+                >
+                  <span className="h-2 w-2 rounded-full bg-[#DC2626]" />
+                  <span>{isEStopped ? 'E-STOPPED' : 'E-STOP'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Live Kinematic Telemetry HUD (Top-Right Floating Overlay) */}
+            <div className="absolute top-16 right-4 sm:right-6 z-10 pointer-events-none flex flex-col items-end gap-1 font-mono text-[10px]">
+              <div className="bg-[#18181B]/85 text-white backdrop-blur-md px-3 py-1.5 rounded border border-[#3F3F46] shadow-sm flex items-center gap-3">
+                <span className="text-[#38BDF8] font-bold">
+                  θ1: {telemetry.theta1}° | θ2: {telemetry.theta2}° | θ3: {telemetry.theta3}°
+                </span>
+                <span className="text-[#A1A1AA]">
+                  TCP [X: {telemetry.tcpX}mm, Y: {telemetry.tcpY}mm]
+                </span>
+                {armMode === 'orbit' && (
+                  <span className="text-[#10B981] font-bold">
+                    v: {telemetry.vel} mm/s
+                  </span>
+                )}
               </div>
             </div>
 
@@ -988,11 +1546,19 @@ export const HeroSection: React.FC = () => {
             <div className="absolute bottom-3 sm:bottom-3.5 left-4 sm:left-6 right-4 sm:right-6 z-10 flex items-center justify-between gap-2 pointer-events-none">
               <span className="inline-flex items-center gap-2 px-3 py-1 rounded bg-[#DFDFDC]/90 border border-[#C8C8C2] font-mono text-[10px] text-[#222220] font-semibold shadow-sm max-w-full truncate">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#10B981] shrink-0" />
-                <span className="truncate">Inverse Kinematics · Real-Time IK Solver · Precision End-Effector</span>
+                <span className="truncate">
+                  {armMode === 'cursor'
+                    ? 'CAD Wireframe Mode · Real-Time Analytical Inverse Kinematics · Coordinate Frames {0,1,2,TCP}'
+                    : armMode === 'orbit'
+                    ? 'Live Kinematics Mode · Dynamic Velocity Vector · Forward Kinematics Telemetry'
+                    : 'Autonomous SMT Assembly Workcell · Feeder Track · PCB Placement · Automated Optical Inspection'}
+                </span>
               </span>
 
               <span className="font-mono text-[10px] text-[#666662] font-medium hidden sm:inline shrink-0 bg-[#DFDFDC]/80 px-2.5 py-1 rounded border border-[#C8C8C2]">
-                Click or tap stage to grip · Select Pick &amp; Place for automatic cycle
+                {armMode === 'pick-place'
+                  ? 'Continuous SMT Assembly Cycle with Automated Optical Inspection'
+                  : 'Move cursor to guide arm · Tap stage to grip/release'}
               </span>
             </div>
           </div>
