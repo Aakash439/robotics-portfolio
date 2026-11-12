@@ -90,11 +90,16 @@ if (!indexHtml.includes('canonical')) {
 }
 console.log('[7] PASS: index.html implements strict-origin-when-cross-origin referrer policy and canonical link.');
 
-// 8. Verify public image assets exist on disk
+// 8. Verify public image assets & Google Search favicons exist on disk
 const expectedAssets = [
   'public/assets/editorial/engineering-workspace.jpg',
   'public/assets/editorial/hero-mechanical-assembly.jpg',
   'public/favicon.svg',
+  'public/favicon.ico',
+  'public/favicon-48x48.png',
+  'public/favicon-96x96.png',
+  'public/favicon-192x192.png',
+  'public/apple-touch-icon.png',
   'public/robots.txt',
   'public/sitemap.xml',
 ];
